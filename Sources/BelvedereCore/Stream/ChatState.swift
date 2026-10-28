@@ -153,7 +153,7 @@ public struct ChatState: Sendable {
         return s
     }
 
-    private mutating func upsert(_ item: TranscriptItem) {
+    mutating func upsert(_ item: TranscriptItem) {
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item
         } else {
