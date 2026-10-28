@@ -117,6 +117,7 @@ struct SettingsView: View {
                             }
                             Spacer()
                             Button("Mostra di nuovo") { model.unhide(session.id) }
+                            DeleteButton(sessionIDs: [session.id]).labelStyle(.titleOnly)
                         }
                     }
                 }

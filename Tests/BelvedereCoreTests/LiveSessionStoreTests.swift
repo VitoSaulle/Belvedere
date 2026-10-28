@@ -31,6 +31,14 @@ import Testing
         #expect(removed == ["t1"])
     }
 
+    @Test func forgetDropsLogAndHookState() {
+        var store = LiveSessionStore()
+        store.apply(IndexUpdate(changed: [logSnapshot("a", status: .idle), logSnapshot("b", status: .idle)], newBuckets: []))
+        store.apply(hook("Stop", session: "a"), origin: nil)
+        store.forget(["a"])
+        #expect(store.sessions.map(\.id) == ["b"])
+    }
+
     private let bash = #","tool_name":"Bash","tool_input":{"command":"rm -rf x"}"#
 
     @Test func postToolUseOfAnotherToolKeepsPermission() {

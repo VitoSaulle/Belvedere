@@ -192,6 +192,42 @@ extension TranscriptIndexTests {
     }
 }
 
+extension TranscriptIndexTests {
+    /// Eliminare una sessione cancella il log, la cartella dei subagenti e l'entrata dell'indice,
+    /// ma non il consumo già contato nelle statistiche.
+    @Test func deleteRemovesFilesButKeepsStats() async throws {
+        let files = seed()
+        let line = #"{"type":"assistant","sessionId":"s1","cwd":"/Users/v/proj","timestamp":"2026-10-28T09:30:00.000Z","message":{"id":"sub1","model":"claude-haiku-5-5","stop_reason":"end_turn","content":[],"usage":{"input_tokens":7,"output_tokens":3}}}"#
+        let sub = tmp.file("claude/-Users-v-proj/s1/subagents/agent-a1.jsonl", line + "\n")
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let buckets = await index.buckets.count
+        let codexID = try #require(await index.sessions.first { $0.agent == .codex }).id
+
+        let deleted = await index.delete(sessionIDs: ["s1", codexID])
+
+        #expect(Set(deleted) == ["s1", codexID])
+        for url in [files.claude, files.codex, sub.deletingLastPathComponent().deletingLastPathComponent()] {
+            #expect(!FileManager.default.fileExists(atPath: url.path))
+        }
+        #expect(FileManager.default.fileExists(atPath: tmp.url.appendingPathComponent("claude/-Users-v-proj").path))
+        #expect(await index.sessions.isEmpty)
+        #expect(await index.buckets.count == buckets)
+        // Gli eventi FSEvents che arrivano dopo non la fanno ricomparire come «chiusa».
+        #expect(await index.refresh(paths: [files.claude.path, files.codex.path]).changed.isEmpty)
+        #expect(await index.refreshAll(progress: nil).changed.isEmpty)
+    }
+
+    @Test func deleteIgnoresUnknownIDs() async {
+        let files = seed()
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.delete(sessionIDs: ["nope"]).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: files.claude.path))
+        #expect(await index.sessions.count == 2)
+    }
+}
+
 @Suite struct DirectoryWatcherTests {
     @Test func reportsChangedFiles() async throws {
         let tmp = TempDir()
