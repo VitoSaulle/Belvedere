@@ -100,6 +100,7 @@ struct Composer: View {
                 .padding(.vertical, 6)
             Menu {
                 Button("Apri nel terminale", systemImage: "terminal") { Task { await model.openInTerminal(sessionID) } }
+                    .disabled(model.isTransferring(sessionID))
                 if !host.isRunning {
                     Button("Riavvia la sessione", systemImage: "arrow.clockwise") { host.restart() }
                 }
@@ -323,6 +324,8 @@ struct Composer: View {
             Text("/\(name) funziona solo nel terminale.").font(.system(size: 12.5))
             Spacer()
             Button("Apri nel terminale") { Task { await model.openInTerminal(sessionID) } }
+                .disabled(model.isTransferring(sessionID))
+                .help(model.isTransferring(sessionID) ? "Disponibile dopo la prima risposta nel nuovo profilo" : "")
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
             Button { terminalOnly = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)

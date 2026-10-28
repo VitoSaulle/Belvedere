@@ -9,6 +9,7 @@ struct NewSessionSheet: View {
 
     @State private var folder = ""
     @State private var agent: AgentKind = .claude
+    @State private var profileID: UUID?
     @State private var isLocal = false
     @State private var cloudModel: String?
     @State private var localModel: LMStudioModel?
@@ -126,6 +127,14 @@ struct NewSessionSheet: View {
                 ChoiceCard(title: "Claude Code", subtitle: "claude -p, stream-json", selected: agent == .claude) { agent = .claude }
                 ChoiceCard(title: "Codex", subtitle: "codex app-server", selected: agent == .codex) { agent = .codex }
             }
+            if model.profiles.hasChoice(agent) {
+                Picker("Profilo", selection: Binding(get: { profile.id }, set: { profileID = $0 })) {
+                    ForEach(model.profiles.profiles(agent)) { p in
+                        Text(ProfileMenu.label(p, model: model)).tag(p.id).disabled(model.profileFolderMissing(p))
+                    }
+                }
+                .padding(.top, 4)
+            }
         }
     }
 
@@ -227,12 +236,12 @@ struct NewSessionSheet: View {
         SheetSection(title: "Comando") {
             VStack(alignment: .leading, spacing: 4) {
                 if agent == .codex {
-                    Text(folder.isEmpty ? "codex" : CodexCommand.preview(options))
+                    Text(folder.isEmpty ? "codex" : CodexCommand.preview(options, profile: profile))
                 } else {
                     if let local = options.local {
                         Text("ANTHROPIC_BASE_URL=http://localhost:1234  ANTHROPIC_MODEL=\(local.id)")
                     }
-                    Text(folder.isEmpty ? "claude" : ClaudeCommand.preview(options, isGitRepository: isGitRepository))
+                    Text(folder.isEmpty ? "claude" : ClaudeCommand.preview(options, isGitRepository: isGitRepository, profile: profile))
                 }
             }
             .font(.system(size: 12, design: .monospaced))
@@ -273,7 +282,13 @@ struct NewSessionSheet: View {
                       permission: permission,
                       local: isLocal ? localModel.map { LocalModelChoice(id: $0.id, contextLength: $0.contextLength) } : nil,
                       worktree: worktree && canUseWorktree,
-                      name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name)
+                      name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name,
+                      profileID: profile.id)
+    }
+
+    /// Il profilo scelto per la CLI, altrimenti l'attivo (anche quando un preset ne nomina uno sparito).
+    private var profile: Profile {
+        model.profiles.profile(profileID).flatMap { $0.agent == agent ? $0 : nil } ?? model.profiles.active(agent)
     }
 
     private var isGitRepository: Bool { !folder.isEmpty && GitInfo.isRepository(folder) }
@@ -308,6 +323,7 @@ struct NewSessionSheet: View {
         permission = o.permission
         worktree = o.worktree
         name = o.name ?? ""
+        profileID = o.profileID
     }
 
     private func chooseFolder() {

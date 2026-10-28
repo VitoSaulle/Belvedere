@@ -20,7 +20,9 @@ struct SettingsView: View {
                         Text(model.hooksInstalled ? "Collegato" : "Non collegato")
                     }
                 }
-                Text("Il collegamento aggiunge a ~/.claude/settings.json i hook di Belvedere e una status line che inoltra i limiti del piano. Le altre impostazioni restano com'erano e prima di ogni modifica viene salvata una copia.")
+                Text(model.profiles.hasChoice(.claude)
+                     ? "Il collegamento aggiunge al settings.json di ogni profilo Claude i hook di Belvedere e una status line che inoltra i limiti del piano. Le altre impostazioni restano com'erano e prima di ogni modifica viene salvata una copia."
+                     : "Il collegamento aggiunge a ~/.claude/settings.json i hook di Belvedere e una status line che inoltra i limiti del piano. Le altre impostazioni restano com'erano e prima di ogni modifica viene salvata una copia.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -47,6 +49,8 @@ struct SettingsView: View {
                     Text(error).font(.callout).foregroundStyle(Theme.danger)
                 }
             }
+
+            ProfilesSection()
 
             Section("Permessi") {
                 Picker("Richieste di permesso", selection: Binding(

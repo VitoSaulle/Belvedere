@@ -103,6 +103,8 @@ public struct SessionSnapshot: Codable, Equatable, Sendable, Identifiable {
     public var filesChanged: [FileChange]
     public var pending: PendingRequest?
     public var origin: SessionOrigin?
+    /// Profilo (account) a cui appartiene la sessione, dedotto dalla cartella della trascrizione.
+    public var profileID: UUID?
 
     public init(id: String, agent: AgentKind, cwd: String = "", transcriptPath: String = "") {
         self.id = id

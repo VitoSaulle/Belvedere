@@ -19,10 +19,11 @@ public enum ClaudeCommand {
         "CLAUDE_CODE_SIMPLE",
     ]
 
-    /// Variabili del processo: via quelle di una sessione Claude genitore, e per i modelli locali
-    /// l'indirizzo di LM Studio. Nessun file di configurazione viene toccato.
-    public static func environment(_ o: LaunchOptions, base: [String: String]) -> [String: String] {
-        var env = base.filter { key, _ in !parentSessionVariables.contains(key) }
+    /// Variabili del processo: via quelle di una sessione Claude genitore, la cartella del profilo
+    /// e per i modelli locali l'indirizzo di LM Studio. Nessun file di configurazione viene toccato.
+    public static func environment(_ o: LaunchOptions, base: [String: String], profile: Profile? = nil) -> [String: String] {
+        var env = profileEnvironment(base.filter { key, _ in !parentSessionVariables.contains(key) },
+                                     key: "CLAUDE_CONFIG_DIR", profile: profile)
         if let local = o.local {
             env["ANTHROPIC_BASE_URL"] = "http://localhost:1234"
             env["ANTHROPIC_AUTH_TOKEN"] = "lmstudio"
@@ -34,10 +35,24 @@ public enum ClaudeCommand {
         return env
     }
 
+    /// La variabile ereditata si toglie sempre: vale solo quella del profilo, e il predefinito non ne ha.
+    static func profileEnvironment(_ base: [String: String], key: String, profile: Profile?) -> [String: String] {
+        var env = base
+        env.removeValue(forKey: key)
+        if let profile, !profile.isDefault { env[key] = profile.configDir }
+        return env
+    }
+
+    /// `CLAUDE_CONFIG_DIR='…' ` davanti al comando, per un profilo non predefinito.
+    static func profilePrefix(_ profile: Profile?) -> String {
+        guard let profile, !profile.isDefault else { return "" }
+        return "\(profile.environmentKey)=\(quote(profile.configDir)) "
+    }
+
     /// Comando equivalente da terminale, con le sole scelte dell'utente.
-    public static func preview(_ o: LaunchOptions, isGitRepository: Bool) -> String {
+    public static func preview(_ o: LaunchOptions, isGitRepository: Bool, profile: Profile? = nil) -> String {
         let args = variableArguments(o, isGitRepository: isGitRepository).map(quoteIfNeeded)
-        return (["cd \(quote(o.folder)) && claude"] + args).joined(separator: " ")
+        return (["cd \(quote(o.folder)) && \(profilePrefix(profile))claude"] + args).joined(separator: " ")
     }
 
     public static func locateBinary(home: String, path: String?, isExecutable: (String) -> Bool) -> String? {
@@ -108,6 +123,13 @@ public enum TerminalHandoff {
             .map { "export \($0.key)=\(ClaudeCommand.quote($0.value))\n" }.joined()
         return "#!/bin/zsh\necho $$ > \(ClaudeCommand.quote(pidFile))\n" + exports
             + "cd \(ClaudeCommand.quote(cwd)) && exec \(arguments.map(ClaudeCommand.quote).joined(separator: " "))\n"
+    }
+
+    /// Script `.command` che apre il login della CLI nella cartella del profilo: il login lo fa la CLI, non Belvedere.
+    public static func loginScript(profile: Profile, binary: String) -> String {
+        let export = profile.isDefault ? "" : "export \(profile.environmentKey)=\(ClaudeCommand.quote(profile.configDir))\n"
+        let command = profile.agent == .claude ? "/login" : "login"
+        return "#!/bin/zsh\n" + export + "exec \(ClaudeCommand.quote(binary)) \(ClaudeCommand.quote(command))\n"
     }
 
     /// Il processo aperto dallo script è ancora vivo (anche se fermo su una domanda del terminale).

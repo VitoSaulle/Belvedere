@@ -23,6 +23,7 @@ struct MainWindow: View {
                 .navigationTitle("")
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
                 .toolbar {
+                    ToolbarItem(placement: .primaryAction) { ProfileMenu() }
                     ToolbarItem(placement: .primaryAction) { AppearanceMenu() }
                 }
         }

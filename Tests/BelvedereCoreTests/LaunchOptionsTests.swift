@@ -34,4 +34,15 @@ import Testing
         #expect(state.lastError == "Codex si è chiuso con il codice 1.")
         #expect(AgentKind.claude.productName == "Claude Code")
     }
+
+    @Test func profileIDRoundTripAndLegacy() throws {
+        let id = UUID()
+        let o = LaunchOptions(folder: "/p", profileID: id)
+        #expect(try JSONDecoder().decode(LaunchOptions.self, from: JSONEncoder().encode(o)).profileID == id)
+        let old = Data(#"{"folder":"/p","permission":"ask","worktree":false}"#.utf8)
+        #expect(try JSONDecoder().decode(LaunchOptions.self, from: old).profileID == nil)
+        var s = SessionSnapshot(id: "t1", agent: .claude, cwd: "/p")
+        s.profileID = id
+        #expect(LaunchOptions.resuming(s).profileID == id)
+    }
 }

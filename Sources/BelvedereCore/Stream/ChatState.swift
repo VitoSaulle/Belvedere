@@ -29,6 +29,8 @@ public struct ChatState: Sendable {
     /// (anche dopo un'interruzione), unendo in un turno solo tutti quelli in coda.
     var queuedTurn = false
     public var lastActivity: Date?
+    /// Turni chiusi senza errore: il primo conferma il passaggio della conversazione a un altro profilo.
+    public var completedTurns = 0
 
     public init(agent: AgentKind = .claude, isLocal: Bool = false, history: [TranscriptItem] = []) {
         self.agent = agent
@@ -106,6 +108,8 @@ public struct ChatState: Sendable {
                 status = asks.isEmpty ? .done : .waiting
                 if result.isError {
                     lastError = result.message?.nilIfEmpty ?? "Il turno si è chiuso con un errore (\(result.subtype))."
+                } else {
+                    completedTurns += 1
                 }
             }
         case .other:

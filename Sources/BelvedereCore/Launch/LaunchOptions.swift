@@ -36,9 +36,12 @@ public struct LaunchOptions: Codable, Equatable, Sendable {
     public var worktree: Bool
     public var resumeID: String?
     public var name: String?
+    /// Profilo con cui parte la sessione; `nil` = il profilo attivo della CLI.
+    public var profileID: UUID?
 
     public init(folder: String, agent: AgentKind = .claude, model: String? = nil, permission: PermissionChoice = .ask,
-                local: LocalModelChoice? = nil, worktree: Bool = false, resumeID: String? = nil, name: String? = nil) {
+                local: LocalModelChoice? = nil, worktree: Bool = false, resumeID: String? = nil, name: String? = nil,
+                profileID: UUID? = nil) {
         self.agent = agent
         self.folder = folder
         self.model = model
@@ -47,9 +50,10 @@ public struct LaunchOptions: Codable, Equatable, Sendable {
         self.worktree = worktree
         self.resumeID = resumeID
         self.name = name
+        self.profileID = profileID
     }
 
-    private enum CodingKeys: String, CodingKey { case agent, folder, model, permission, local, worktree, resumeID, name }
+    private enum CodingKeys: String, CodingKey { case agent, folder, model, permission, local, worktree, resumeID, name, profileID }
 
     /// I preset salvati prima di Codex non hanno `agent`: sono sessioni Claude.
     public init(from decoder: Decoder) throws {
@@ -62,6 +66,7 @@ public struct LaunchOptions: Codable, Equatable, Sendable {
         worktree = try c.decode(Bool.self, forKey: .worktree)
         resumeID = try c.decodeIfPresent(String.self, forKey: .resumeID)
         name = try c.decodeIfPresent(String.self, forKey: .name)
+        profileID = try c.decodeIfPresent(UUID.self, forKey: .profileID)
     }
 
     /// Le stesse scelte per la volta dopo: «Salta permessi» non resta mai selezionato.
@@ -99,6 +104,6 @@ extension LaunchOptions {
     /// Opzioni per riprendere una sessione vista nei log; una sessione locale resta locale.
     public static func resuming(_ s: SessionSnapshot) -> LaunchOptions {
         let local = s.isLocalModel ? s.model.map { LocalModelChoice(id: $0, contextLength: s.contextWindow) } : nil
-        return LaunchOptions(folder: s.cwd, agent: s.agent, local: local, resumeID: s.id)
+        return LaunchOptions(folder: s.cwd, agent: s.agent, local: local, resumeID: s.id, profileID: s.profileID)
     }
 }

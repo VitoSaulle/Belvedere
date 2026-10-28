@@ -13,12 +13,14 @@ final class PluginManager {
     /// Comando da confermare nel terminale (plugin che si installa eseguendo un comando del marketplace).
     private(set) var terminalCommand: String?
     private(set) var changedSinceOpen = false
+    /// I plugin si installano per profilo: quello Claude attivo.
+    var profile: Profile?
 
     func load() async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
-        let output = await Self.run(PluginCommand.listArguments, in: nil)
+        let output = await Self.run(PluginCommand.listArguments, in: nil, profile: profile)
         guard output.code == 0, let catalog = try? PluginCatalog.decode(output.stdout) else {
             error = output.code == -1
                 ? "Claude Code non trovato: installa la CLI o aggiungila al PATH."
@@ -35,7 +37,7 @@ final class PluginManager {
         busy.insert(key)
         defer { busy.remove(key) }
         terminalCommand = nil
-        let output = await Self.run(PluginCommand.arguments(action, plugin: plugin, scope: scope), in: projectPath)
+        let output = await Self.run(PluginCommand.arguments(action, plugin: plugin, scope: scope), in: projectPath, profile: profile)
         let result = PluginResult.decode(output.stdout, exitCode: output.code)
         if result.needsTerminal {
             terminalCommand = PluginCommand.terminalLine(action, plugin: plugin, scope: scope)
@@ -72,7 +74,7 @@ final class PluginManager {
     }
 
     /// Esegue `claude` con gli argomenti dati; i comandi di progetto partono nella cartella del progetto.
-    private nonisolated static func run(_ arguments: [String], in folder: String?) async -> Output {
+    private nonisolated static func run(_ arguments: [String], in folder: String?, profile: Profile?) async -> Output {
         let env = ProcessInfo.processInfo.environment
         guard let binary = ClaudeCommand.locateBinary(home: NSHomeDirectory(), path: env["PATH"],
                                                       isExecutable: { FileManager.default.isExecutableFile(atPath: $0) }) else {
@@ -82,7 +84,8 @@ final class PluginManager {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: binary)
             process.arguments = arguments
-            process.environment = ClaudeCommand.environment(LaunchOptions(folder: folder ?? NSHomeDirectory()), base: env)
+            process.environment = ClaudeCommand.environment(LaunchOptions(folder: folder ?? NSHomeDirectory()), base: env,
+                                                            profile: profile)
             process.currentDirectoryURL = URL(fileURLWithPath: folder ?? NSHomeDirectory())
             process.standardInput = FileHandle.nullDevice
             let out = Pipe(), err = Pipe()

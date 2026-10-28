@@ -10,9 +10,21 @@ final class AppModel {
     /// Tutte le sessioni, nascoste comprese: statistiche e apertura per id.
     private(set) var allSessions: [SessionSnapshot] = []
     private(set) var hidden = HiddenSessions()
-    /// Limiti del piano Claude; quelli di Codex sono di un altro piano e restano a parte.
+    /// Limiti del piano Claude del profilo attivo; quelli di Codex sono di un altro piano e restano a parte.
     var planLimits: PlanLimits?
     var codexLimits: PlanLimits?
+    /// Account di Claude Code e Codex, con il profilo attivo di ciascuna CLI.
+    private(set) var profiles: ProfileSet
+    /// Plancia e sidebar mostrano solo le sessioni dei profili attivi.
+    var showOnlyActiveProfile = UserDefaults.standard.bool(forKey: AppModel.onlyActiveKey) {
+        didSet { UserDefaults.standard.set(showOnlyActiveProfile, forKey: Self.onlyActiveKey) }
+    }
+    /// Profili Claude senza hook e status line di Belvedere.
+    private(set) var unconnectedProfiles: [Profile] = []
+    /// Conversazioni presenti in più profili (cartella copiata a mano): se ne mostra una sola.
+    private(set) var duplicateSessionCount = 0
+    /// Una conversazione che non è passata a un altro profilo: la chat propone una sessione nuova.
+    var transferFailure: TransferFailure?
     var lmStudio: LMStudioStatus?
     var feed: [ActivityEvent] = []
     var indexingProgress: Double?
@@ -31,7 +43,7 @@ final class AppModel {
     var projectFilter: String?
 
     @ObservationIgnored private var store = LiveSessionStore()
-    @ObservationIgnored private let roots: TranscriptRoots
+    @ObservationIgnored private var roots: TranscriptRoots
     @ObservationIgnored private let index: TranscriptIndex
     @ObservationIgnored private let broker: PermissionBroker
     @ObservationIgnored private let lmMonitor = LMStudioMonitor()
@@ -64,14 +76,21 @@ final class AppModel {
     private(set) var terminalOwned: Set<String> = []
     @ObservationIgnored private var savedWindows: [String: Int] = [:]
     @ObservationIgnored private var hookDuplicates = HookDeduplicator()
+    /// Trasferimenti aperti (salvati su disco) e la chat che li conferma, con i turni già fatti all'inizio.
+    @ObservationIgnored private var openTransfers: [PendingTransfer] = []
+    @ObservationIgnored private var transferHosts: [UUID: (transfer: PendingTransfer, baseline: Int)] = [:]
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
     static let limitsKey = "lastClaudeLimits"
+    static let limitsByProfileKey = "lastClaudeLimitsByProfile"
+    static let onlyActiveKey = "showOnlyActiveProfile"
     static let windowsKey = "knownContextWindows"
 
-    init(roots: TranscriptRoots = .default,
-         policy: PermissionPolicy = PermissionPolicy(storageValue: UserDefaults.standard.string(forKey: AppModel.policyKey))) {
+    init(policy: PermissionPolicy = PermissionPolicy(storageValue: UserDefaults.standard.string(forKey: AppModel.policyKey))) {
+        let profiles = Self.loadProfiles()
+        let roots = TranscriptRoots.from(profiles)
+        self.profiles = profiles
         self.roots = roots
         self.policy = policy
         index = TranscriptIndex(roots: roots, cacheURL: Belvedere.supportDirectory.appendingPathComponent("index.json"))
@@ -151,11 +170,10 @@ final class AppModel {
         refreshBusyFolders()
         refreshHooksInstalled()
         loadHidden()
-        if let data = UserDefaults.standard.data(forKey: Self.limitsKey),
-           let saved = try? JSONDecoder().decode(PlanLimits.self, from: data) {
-            store.apply(claudeLimits: saved)
-            store.tick(now: Date())
-        }
+        store.setRoots(roots)
+        store.setDefaults(defaultProfileIDs)
+        plugins.profile = profiles.active(.claude)
+        restoreLimits()
         if let windows = UserDefaults.standard.dictionary(forKey: Self.windowsKey) as? [String: Int] {
             store.restore(knownWindows: windows)
             savedWindows = windows
@@ -164,13 +182,15 @@ final class AppModel {
         if Belvedere.demoHome == nil { startServer() }
         if !hooksInstalled && !UserDefaults.standard.bool(forKey: Self.welcomeKey) { showWelcome = true }
 
-        let watcher = DirectoryWatcher(paths: [roots.claude, roots.codex]) { [weak self] paths in
-            let relevant = paths.filter { $0.hasSuffix(".jsonl") }
-            guard !relevant.isEmpty else { return }
-            Task { @MainActor in await self?.refresh(paths: relevant) }
+        startWatcher()
+        // Trasferimenti rimasti aperti da un'esecuzione precedente: la copia sparisce, l'origine resta.
+        // Se l'origine non c'è più la conferma si era fermata a metà: la copia è l'unica rimasta e vale come confermata.
+        for transfer in ProfileTransfer.load() {
+            let sourceExists = FileManager.default.fileExists(atPath: transfer.sourcePaths[0])
+            ProfileTransfer.rollback(transfer)
+            _ = await index.endTransfer(transfer, confirmed: !sourceExists)
         }
-        watcher.start()
-        self.watcher = watcher
+        try? ProfileTransfer.save([])
 
         // La cache dell'indice contiene già le sessioni note: si mostrano subito,
         // poi refreshAll porta solo ciò che è cambiato da allora.
@@ -201,6 +221,7 @@ final class AppModel {
     /// Ferma server e sorveglianza e salva l'indice: chiamato prima di uscire.
     func shutdown() async {
         await stopAllHosted()
+        for hostID in Array(transferHosts.keys) { await finishTransfer(hostID, confirmed: false) }
         loops.forEach { $0.cancel() }
         watcher?.stop()
         server?.stop()
@@ -208,32 +229,318 @@ final class AppModel {
         await saveIndex()
     }
 
+    /// Collegato = tutti i profili Claude (con la cartella sul disco) hanno hook e status line.
     func refreshHooksInstalled() {
-        hooksInstalled = (try? ClaudeSettingsInstaller.isInstalled(SettingsFile().read(), port: Belvedere.defaultPort)) ?? false
+        // Il predefinito conta anche senza cartella: senza `~/.claude` Belvedere non è collegato.
+        unconnectedProfiles = profiles.profiles(.claude).filter { p in
+            (p.isDefault || !profileFolderMissing(p))
+                && !((try? ClaudeSettingsInstaller.isInstalled(SettingsFile(profile: p).read(), port: Belvedere.defaultPort)) ?? false)
+        }
+        hooksInstalled = unconnectedProfiles.isEmpty
     }
 
     // MARK: - Collegamento a Claude Code
 
-    var watchedFolders: [URL] { [roots.claude, roots.codex] }
+    var watchedFolders: [URL] { roots.urls }
 
-    /// Copia gli eseguibili e aggiunge hook e status line a `~/.claude/settings.json`, con backup.
+    /// Copia gli eseguibili e aggiunge hook e status line al `settings.json` di ogni profilo Claude, con backup.
+    /// Un profilo che non si riesce a collegare non ferma gli altri.
     func connectClaude() throws {
         let helpers = try ClaudeSettingsInstaller.installHelpers(from: .main)
-        let file = SettingsFile()
+        var failure: Error?
+        for p in profiles.profiles(.claude) where p.isDefault || !profileFolderMissing(p) {
+            do { try connect(p, helpers: helpers) } catch { failure = failure ?? error }
+        }
+        refreshHooksInstalled()
+        if let failure { throw failure }
+    }
+
+    private func connect(_ profile: Profile, helpers: URL) throws {
+        let file = SettingsFile(profile: profile)
         var timeout: Double?
         if case .hold(let seconds) = PermissionPolicy.default { timeout = seconds }
         let updated = ClaudeSettingsInstaller.install(into: try file.read(), helpers: helpers,
                                                       port: Belvedere.defaultPort, permissionTimeout: timeout)
-        remember(backup: try file.writeWithBackup(updated))
-        refreshHooksInstalled()
+        let backup = try file.writeWithBackup(updated)
+        if profile.isDefault { remember(backup: backup) }
     }
 
-    /// Toglie solo le voci di Belvedere, con backup.
+    /// Toglie solo le voci di Belvedere da ogni profilo Claude, con backup.
     func disconnectClaude() throws {
-        let file = SettingsFile()
-        let restored = ClaudeSettingsInstaller.uninstall(from: try file.read(), port: Belvedere.defaultPort)
-        remember(backup: try file.writeWithBackup(restored))
+        var failure: Error?
+        for p in profiles.profiles(.claude) where !profileFolderMissing(p) {
+            do {
+                let file = SettingsFile(profile: p)
+                let restored = ClaudeSettingsInstaller.uninstall(from: try file.read(), port: Belvedere.defaultPort)
+                let backup = try file.writeWithBackup(restored)
+                if p.isDefault { remember(backup: backup) }
+            } catch { failure = failure ?? error }
+        }
         refreshHooksInstalled()
+        if let failure { throw failure }
+    }
+
+    // MARK: - Profili
+
+    private static func loadProfiles() -> ProfileSet {
+        // In dimostrazione i profili puntano sempre dentro la home dimostrativa.
+        if Belvedere.demoHome != nil { return .initial(home: Belvedere.home) }
+        if let data = UserDefaults.standard.data(forKey: ProfileSet.storageKey),
+           let saved = try? JSONDecoder().decode(ProfileSet.self, from: data) { return saved }
+        let initial = ProfileSet.initial(home: Belvedere.home)
+        if let data = try? JSONEncoder().encode(initial) { UserDefaults.standard.set(data, forKey: ProfileSet.storageKey) }
+        return initial
+    }
+
+    private func saveProfiles() {
+        guard Belvedere.demoHome == nil, let data = try? JSONEncoder().encode(profiles) else { return }
+        UserDefaults.standard.set(data, forKey: ProfileSet.storageKey)
+    }
+
+    private var defaultProfileIDs: [AgentKind: UUID] {
+        Dictionary(uniqueKeysWithValues: AgentKind.allCases.map { ($0, profiles.defaultProfile($0).id) })
+    }
+
+    /// Il profilo di una sessione; quelle senza (cache di versioni precedenti) sono del predefinito.
+    func profile(of s: SessionSnapshot) -> Profile {
+        profiles.profile(s.profileID) ?? profiles.defaultProfile(s.agent)
+    }
+
+    func isActiveProfile(_ s: SessionSnapshot) -> Bool {
+        profile(of: s).id == profiles.active(s.agent).id
+    }
+
+    func profileFolderMissing(_ p: Profile) -> Bool {
+        !FileManager.default.fileExists(atPath: p.configDir)
+    }
+
+    func limits(for profile: UUID) -> PlanLimits? { store.planLimits(profile: profile) }
+
+    func setActiveProfile(_ id: UUID) {
+        guard let p = profiles.profile(id), !profileFolderMissing(p) else { return }
+        profiles.setActive(id)
+        saveProfiles()
+        plugins.profile = profiles.active(.claude)
+        publish()
+    }
+
+    /// Crea il profilo (con le impostazioni del predefinito, se richiesto) e lo collega se gli altri lo sono.
+    @discardableResult
+    func addProfile(name: String, agent: AgentKind, folder: String, seedSettings: Bool) async throws -> Profile {
+        let path = URL(fileURLWithPath: (folder as NSString).expandingTildeInPath).standardizedFileURL.path
+        guard !profiles.profiles.contains(where: { URL(fileURLWithPath: $0.configDir).standardizedFileURL.path == path }) else {
+            throw ProfileError.folderInUse
+        }
+        let profile = Profile(name: name, agent: agent, configDir: path)
+        if seedSettings {
+            try ProfileSettings.seed(from: profiles.defaultProfile(agent), to: profile, port: Belvedere.defaultPort)
+        } else {
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        }
+        let wasConnected = hooksInstalled
+        profiles.add(profile)
+        saveProfiles()
+        if agent == .claude, wasConnected {
+            try? connect(profile, helpers: try ClaudeSettingsInstaller.installHelpers(from: .main))
+        }
+        refreshHooksInstalled()
+        await profilesChanged()
+        return profile
+    }
+
+    func renameProfile(_ id: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        profiles.rename(id, to: trimmed)
+        saveProfiles()
+        plugins.profile = profiles.active(.claude)
+    }
+
+    /// Il profilo esce da Belvedere con le sue sessioni; la cartella resta sul disco, le statistiche pure.
+    func removeProfile(_ id: UUID) async {
+        guard let p = profiles.profile(id), !p.isDefault else { return }
+        let gone = Set(allSessions.filter { $0.profileID == id }.map(\.id))
+        profiles.remove(id)
+        saveProfiles()
+        plugins.profile = profiles.active(.claude)
+        refreshHooksInstalled()
+        await profilesChanged()
+        store.forget(gone)
+        publish()
+    }
+
+    /// Apre il Terminale con il login della CLI nella cartella del profilo: il login lo fa la CLI.
+    func login(_ profile: Profile) {
+        guard let binary = HostedSession(options: LaunchOptions(folder: "/", agent: profile.agent)).binary else {
+            serverError = "\(profile.agent.productName) non trovato: installa la CLI o aggiungila al PATH."
+            return
+        }
+        let folder = Belvedere.supportDirectory.appendingPathComponent("handoff")
+        let url = folder.appendingPathComponent("login-\(profile.id.uuidString).command")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try TerminalHandoff.loginScript(profile: profile, binary: binary).write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            NSWorkspace.shared.open(url)
+        } catch {
+            serverError = "Non riesco ad aprire il terminale: \(error.localizedDescription)"
+        }
+    }
+
+    private func profilesChanged() async {
+        let newRoots = TranscriptRoots.from(profiles)
+        guard newRoots != roots else { publish(); return }
+        roots = newRoots
+        store.setRoots(newRoots)
+        store.setDefaults(defaultProfileIDs)
+        startWatcher()
+        await absorb(await index.setRoots(newRoots))
+    }
+
+    private func startWatcher() {
+        watcher?.stop()
+        let watcher = DirectoryWatcher(paths: roots.urls) { [weak self] paths in
+            let relevant = paths.filter { $0.hasSuffix(".jsonl") }
+            guard !relevant.isEmpty else { return }
+            Task { @MainActor in await self?.refresh(paths: relevant) }
+        }
+        watcher.start()
+        self.watcher = watcher
+    }
+
+    private func restoreLimits() {
+        let defaults = UserDefaults.standard
+        if let data = defaults.data(forKey: Self.limitsByProfileKey),
+           let saved = try? JSONDecoder().decode([String: PlanLimits].self, from: data) {
+            store.restore(claudeLimits: Dictionary(uniqueKeysWithValues: saved.compactMap { key, value in
+                UUID(uuidString: key).map { ($0, value) }
+            }))
+        } else if let data = defaults.data(forKey: Self.limitsKey),
+                  let saved = try? JSONDecoder().decode(PlanLimits.self, from: data) {
+            // Prima dei profili c'era un solo account: i suoi limiti vanno al predefinito.
+            store.restore(claudeLimits: [profiles.defaultProfile(.claude).id: saved])
+            saveLimits()
+        }
+        store.tick(now: Date())
+    }
+
+    private func saveLimits() {
+        let byProfile = Dictionary(uniqueKeysWithValues: store.claudeLimits.map { ($0.key.uuidString, $0.value) })
+        if let data = try? JSONEncoder().encode(byProfile) { UserDefaults.standard.set(data, forKey: Self.limitsByProfileKey) }
+    }
+
+    /// Sessioni della Plancia e della sidebar: con «Solo profilo attivo» quelle degli altri profili escono.
+    /// Menu bar e notch usano `sessions`: le richieste arrivano da tutti i profili.
+    var boardSessions: [SessionSnapshot] {
+        guard showOnlyActiveProfile, AgentKind.allCases.contains(where: profiles.hasChoice) else { return sessions }
+        return sessions.filter(isActiveProfile)
+    }
+
+    // MARK: - Continuare in un altro profilo
+
+    /// Gli altri profili della stessa CLI, con la cartella sul disco.
+    func continueTargets(_ s: SessionSnapshot) -> [Profile] {
+        let current = profile(of: s).id
+        return profiles.profiles(s.agent).filter { $0.id != current && !profileFolderMissing($0) }
+    }
+
+    /// Il profilo con più margine nella finestra di 5 ore; uno senza limiti noti vale come libero.
+    func bestTarget(_ s: SessionSnapshot) -> Profile? {
+        continueTargets(s).min { (limits(for: $0.id)?.fiveHour?.usedPercent ?? 0) < (limits(for: $1.id)?.fiveHour?.usedPercent ?? 0) }
+    }
+
+    /// La sessione si è fermata per il limite del piano: errore della chat o finestra di 5 ore piena.
+    func hitPlanLimit(_ s: SessionSnapshot) -> Bool {
+        if let error = host(for: s.id)?.state.lastError, error.localizedCaseInsensitiveContains("limit") { return true }
+        return (limits(for: profile(of: s).id)?.fiveHour?.usedPercent ?? 0) >= 100
+    }
+
+    /// Una conversazione ferma, non aperta altrove, con un file da spostare.
+    func canContinueElsewhere(_ s: SessionSnapshot) -> Bool {
+        guard ![.working, .waiting].contains(s.status), !s.cwd.isEmpty, !s.transcriptPath.isEmpty,
+              profiles.hasChoice(s.agent), !openTransfers.contains(where: { $0.sessionID == s.id }) else { return false }
+        guard let busy = busyFolders?[s.agent], !busy.contains(RunningProcesses.canonical(s.cwd)) else { return false }
+        return !terminalOwned.contains(s.id)
+    }
+
+    /// Sposta la conversazione nel profilo e la riprende lì. L'originale si cancella alla prima risposta riuscita;
+    /// se la ripresa fallisce o la chat si chiude prima, la copia sparisce e l'originale resta.
+    func continueIn(_ sessionID: String, profile targetID: UUID) async {
+        guard let s = session(sessionID), canContinueElsewhere(s),
+              let target = profiles.profile(targetID), target.agent == s.agent else { return }
+        let source = profile(of: s)
+        guard source.id != target.id else { return }
+        transferFailure = nil
+        if let host = host(for: sessionID) {
+            await host.stop()
+            hostedSessions.removeAll { $0 === host }
+            syncHosted()
+        }
+        let transfer: PendingTransfer
+        do {
+            transfer = try ProfileTransfer.begin(transcriptPath: s.transcriptPath, sessionID: s.id, agent: s.agent,
+                                                 from: source, to: target)
+        } catch {
+            transferFailure = TransferFailure(sessionID: s.id, folder: s.cwd, profile: targetID)
+            return
+        }
+        openTransfers.append(transfer)
+        try? ProfileTransfer.save(openTransfers)
+        await absorb(await index.beginTransfer(transfer))
+        guard let host = resume(sessionID) else {
+            await abandon(transfer)
+            return
+        }
+        transferHosts[host.id] = (transfer, host.state.completedTurns)
+        checkTransfer(host)
+    }
+
+    /// Apre una sessione nuova nella cartella, con il profilo scelto: il ripiego di un trasferimento non riuscito.
+    func startFresh(folder: String, profile: UUID) {
+        guard let p = profiles.profile(profile) else { return }
+        transferFailure = nil
+        launch(LaunchOptions(folder: folder, agent: p.agent, profileID: p.id))
+    }
+
+    private func checkTransfer(_ host: HostedSession) {
+        guard let pending = transferHosts[host.id] else { return }
+        let state = host.state
+        if state.completedTurns > pending.baseline {
+            Task { await finishTransfer(host.id, confirmed: true) }
+        } else if !host.isRunning || (state.lastError != nil && state.status != .working && state.status != .waiting) {
+            // Errore prima della prima risposta (login, limite, processo uscito) o chat chiusa.
+            let failed = state.lastError != nil
+            Task {
+                await host.stop()
+                await finishTransfer(host.id, confirmed: false, failed: failed)
+            }
+        }
+    }
+
+    private func finishTransfer(_ hostID: UUID, confirmed: Bool, failed: Bool = false) async {
+        guard let (transfer, _) = transferHosts.removeValue(forKey: hostID) else { return }
+        if confirmed {
+            try? ProfileTransfer.confirm(transfer)
+            openTransfers.removeAll { $0 == transfer }
+            try? ProfileTransfer.save(openTransfers)
+            await absorb(await index.endTransfer(transfer, confirmed: true))
+            return
+        }
+        // La chat ferma resterebbe sul profilo di destinazione: «Riprendi» ripartirebbe da lì.
+        hostedSessions.removeAll { $0.id == hostID && !$0.isRunning }
+        syncHosted()
+        await abandon(transfer)
+        if failed, let target = profiles.profile(transfer.to) {
+            transferFailure = TransferFailure(sessionID: transfer.sessionID, folder: session(transfer.sessionID)?.cwd ?? "",
+                                              profile: target.id)
+        }
+    }
+
+    private func abandon(_ transfer: PendingTransfer) async {
+        ProfileTransfer.rollback(transfer)
+        openTransfers.removeAll { $0 == transfer }
+        try? ProfileTransfer.save(openTransfers)
+        await absorb(await index.endTransfer(transfer, confirmed: false))
     }
 
     func setPolicy(_ newPolicy: PermissionPolicy) {
@@ -316,7 +623,10 @@ final class AppModel {
 
     @discardableResult
     func launch(_ options: LaunchOptions, history: [TranscriptItem] = []) -> HostedSession {
-        let host = HostedSession(options: options, history: history)
+        var options = options
+        // Senza profilo (o con uno sparito) la sessione parte con il profilo attivo della CLI.
+        if profiles.profile(options.profileID)?.agent != options.agent { options.profileID = profiles.active(options.agent).id }
+        let host = HostedSession(options: options, profile: profiles.profile(options.profileID), history: history)
         host.onChange = { [weak self, weak host] in
             guard let self, let host else { return }
             self.hostChanged(host)
@@ -334,12 +644,13 @@ final class AppModel {
     }
 
     /// Riprende in Belvedere una sessione vista nei log, con la sua conversazione.
-    func resume(_ sessionID: String) {
-        guard let s = session(sessionID) else { return }
+    @discardableResult
+    func resume(_ sessionID: String) -> HostedSession? {
+        guard let s = session(sessionID) else { return nil }
         if let existing = host(for: sessionID) {
             existing.restart()
             route = .session(sessionID)
-            return
+            return existing
         }
         let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: s.agent)) ?? []
         var options = LaunchOptions.resuming(s)
@@ -347,7 +658,7 @@ final class AppModel {
         if let local = options.local, let loaded = lmStudio?.models.first(where: { $0.id == local.id && $0.loaded }) {
             options.local = LocalModelChoice(id: local.id, contextLength: loaded.contextLength ?? local.contextLength)
         }
-        launch(options, history: history)
+        return launch(options, history: history)
     }
 
     /// «Riprendi in Belvedere» solo se la sessione non è viva altrove: mai due processi sulla stessa sessione.
@@ -388,8 +699,15 @@ final class AppModel {
         Belvedere.supportDirectory.appendingPathComponent("handoff/\(id).pid")
     }
 
+    /// Una conversazione che sta passando a un altro profilo: finché non risponde, resta in Belvedere.
+    func isTransferring(_ sessionID: String) -> Bool {
+        openTransfers.contains { $0.sessionID == sessionID }
+    }
+
     /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume` o `codex resume`.
     func openInTerminal(_ sessionID: String) async {
+        // Fermare la chat annullerebbe il trasferimento e cancellerebbe la copia che il terminale sta per riprendere.
+        guard !isTransferring(sessionID) else { return }
         let host = host(for: sessionID)
         // Senza id (nessun messaggio ancora inviato) non c'è niente da riprendere nel terminale.
         guard let s = host?.state.snapshot(launchedAt: host?.launchedAt) ?? session(sessionID),
@@ -406,13 +724,16 @@ final class AppModel {
         // Una sessione locale resta su LM Studio anche nel terminale.
         let options = host.map { $0.options.resuming(s.id, cwd: s.cwd) } ?? LaunchOptions.resuming(s)
         let script: String
+        // Nel terminale con lo stesso account: la cartella del profilo, se non è il predefinito.
+        let profile = profiles.profile(options.profileID) ?? self.profile(of: s)
+        let account = profile.isDefault ? [:] : [profile.environmentKey: profile.configDir]
         if s.agent == .codex {
             script = TerminalHandoff.script(cwd: s.cwd, arguments: [binary] + CodexCommand.terminalArguments(options),
-                                            pidFile: Self.handoffPID(s.id).path)
+                                            pidFile: Self.handoffPID(s.id).path, environment: account)
         } else {
             let local = options.local == nil ? [:] : ClaudeCommand.environment(options, base: [:])
             script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
-                                            pidFile: Self.handoffPID(s.id).path, environment: local)
+                                            pidFile: Self.handoffPID(s.id).path, environment: local.merging(account) { $1 })
         }
         try? FileManager.default.removeItem(at: Self.handoffPID(s.id))
         handedOff.insert(s.id)
@@ -466,10 +787,12 @@ final class AppModel {
             route = .session(Self.provisionalPrefix + host.id.uuidString)
         }
         // I limiti di Codex arrivano già dai file di sessione: qui solo quelli del piano Claude.
-        if host.agent == .claude, let limits = host.state.limits, limits != store.claudeLimits {
-            store.apply(claudeLimits: limits)
-            if let data = try? JSONEncoder().encode(limits) { UserDefaults.standard.set(data, forKey: Self.limitsKey) }
+        if host.agent == .claude, let limits = host.state.limits, let profile = host.options.profileID,
+           limits != store.claudeLimits[profile] {
+            store.apply(claudeLimits: limits, profile: profile)
+            saveLimits()
         }
+        checkTransfer(host)
         syncHosted()
         saveKnownWindows()
     }
@@ -485,7 +808,9 @@ final class AppModel {
         let exited = hostedSessions.filter { !$0.isRunning }
         store.setHosted(Set(live.compactMap(\.state.sessionID)), exited: Set(exited.compactMap(\.state.sessionID)))
         for host in hostedSessions {
-            if let snapshot = host.state.snapshot(launchedAt: host.launchedAt) { store.apply(hosted: snapshot) }
+            guard var snapshot = host.state.snapshot(launchedAt: host.launchedAt) else { continue }
+            snapshot.profileID = host.options.profileID
+            store.apply(hosted: snapshot)
         }
         store.tick(now: Date())
         publish()
@@ -558,9 +883,7 @@ final class AppModel {
 
     private func ingest(_ payload: StatusLinePayload) {
         store.apply(payload)
-        if let limits = payload.limits, let data = try? JSONEncoder().encode(limits) {
-            UserDefaults.standard.set(data, forKey: Self.limitsKey)
-        }
+        if payload.limits != nil { saveLimits() }
         saveKnownWindows()
         publish()
     }
@@ -578,7 +901,10 @@ final class AppModel {
 
     private func absorb(_ update: IndexUpdate) async {
         store.apply(update)
-        store.apply(codexLimits: await index.latestCodexLimits)
+        var codex: [UUID: PlanLimits] = [:]
+        for p in profiles.profiles(.codex) { codex[p.id] = await index.latestCodexLimits(profile: p.id) }
+        store.apply(codexLimits: codex)
+        duplicateSessionCount = await index.duplicateCount
         if !update.newBuckets.isEmpty || buckets.isEmpty { buckets = await index.buckets }
         publish()
     }
@@ -606,9 +932,9 @@ final class AppModel {
         if next != allSessions { allSessions = next }
         let visible = next.filter { !hidden.isHidden($0) }
         if visible != sessions { sessions = visible }
-        let limits = store.planLimits(.claude)
+        let limits = store.planLimits(profile: profiles.active(.claude).id)
         if limits != planLimits { planLimits = limits }
-        let codex = store.planLimits(.codex)
+        let codex = store.planLimits(profile: profiles.active(.codex).id)
         if codex != codexLimits { codexLimits = codex }
     }
 
@@ -625,6 +951,23 @@ final class AppModel {
                 guard let self else { return }
                 await body(self)
             }
+        }
+    }
+}
+
+/// Una conversazione rimasta nel profilo di origine: si può aprire una sessione nuova nella sua cartella.
+struct TransferFailure: Equatable {
+    let sessionID: String
+    let folder: String
+    let profile: UUID
+}
+
+enum ProfileError: LocalizedError {
+    case folderInUse
+
+    var errorDescription: String? {
+        switch self {
+        case .folderInUse: "Questa cartella è già di un altro profilo."
         }
     }
 }

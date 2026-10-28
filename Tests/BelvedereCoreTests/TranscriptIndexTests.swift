@@ -4,8 +4,12 @@ import Testing
 
 @Suite struct TranscriptIndexTests {
     let tmp = TempDir()
-    var roots: TranscriptRoots {
-        TranscriptRoots(claude: tmp.url.appendingPathComponent("claude"), codex: tmp.url.appendingPathComponent("codex"))
+    let roots: TranscriptRoots
+    init() {
+        roots = TranscriptRoots([
+            TranscriptRoot(profileID: UUID(), agent: .claude, url: tmp.url.appendingPathComponent("claude")),
+            TranscriptRoot(profileID: UUID(), agent: .codex, url: tmp.url.appendingPathComponent("codex")),
+        ])
     }
     var cacheURL: URL { tmp.url.appendingPathComponent("index.json") }
     private func text(_ name: String) -> String { try! String(contentsOf: Fixture.url(name), encoding: .utf8) }
@@ -24,7 +28,7 @@ import Testing
         let sessions = await index.sessions
         #expect(update.changed.count == 2)
         #expect(Set(sessions.map(\.agent)) == [.claude, .codex])
-        #expect(await index.latestCodexLimits?.fiveHour?.usedPercent == 21)
+        #expect(await index.latestCodexLimits(profile: roots.roots[1].profileID)?.fiveHour?.usedPercent == 21)
         #expect(!(await index.buckets).isEmpty)
     }
 
@@ -241,5 +245,156 @@ extension TranscriptIndexTests {
             try await Task.sleep(for: .milliseconds(100))
         }
         #expect(seen.withLock { $0.contains { ($0 as NSString).resolvingSymlinksInPath == (f.path as NSString).resolvingSymlinksInPath } })
+    }
+}
+
+extension TranscriptIndexTests {
+    // MARK: - Profili
+
+    static let pA = UUID(), pB = UUID(), pX = UUID(), pY = UUID()
+
+    private func profileRoots(claude2: URL? = nil, withB: Bool = true, codex2: Bool = false) -> TranscriptRoots {
+        var list = [TranscriptRoot(profileID: Self.pA, agent: .claude, url: tmp.url.appendingPathComponent("claude"))]
+        if withB { list.append(TranscriptRoot(profileID: Self.pB, agent: .claude, url: claude2 ?? tmp.url.appendingPathComponent("claude2"))) }
+        list.append(TranscriptRoot(profileID: Self.pX, agent: .codex, url: tmp.url.appendingPathComponent("codex")))
+        if codex2 { list.append(TranscriptRoot(profileID: Self.pY, agent: .codex, url: tmp.url.appendingPathComponent("codex2"))) }
+        return TranscriptRoots(list)
+    }
+
+    @Test func snapshotsCarryProfile() async {
+        _ = seed()
+        _ = tmp.file("claude2/-Users-v-proj/s2.jsonl", text("claude-sample.jsonl").replacingOccurrences(of: "\"s1\"", with: "\"s2\""))
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        let update = await index.refreshAll(progress: nil)
+        let byID = Dictionary(uniqueKeysWithValues: await index.sessions.map { ($0.id, $0.profileID) })
+        #expect(byID["s1"] == Self.pA)
+        #expect(byID["s2"] == Self.pB)
+        #expect(byID["01a1494b-8ccc-7553-99cb-df33363f95a1"] == Self.pX)
+        #expect(update.changed.allSatisfy { $0.profileID != nil })
+    }
+
+    @Test func symlinkedRootIsClassified() async throws {
+        _ = seed()
+        _ = tmp.file("real2/-Users-v-proj/s2.jsonl", text("claude-sample.jsonl").replacingOccurrences(of: "\"s1\"", with: "\"s2\""))
+        let link = tmp.url.appendingPathComponent("claude2")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: tmp.url.appendingPathComponent("real2"))
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.first { $0.id == "s2" }?.profileID == Self.pB)
+    }
+
+    @Test func setRootsRemovesAndAdds() async {
+        _ = seed()
+        _ = tmp.file("claude2/-Users-v-proj/s2.jsonl", text("claude-sample.jsonl").replacingOccurrences(of: "\"s1\"", with: "\"s2\""))
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let total = await index.buckets.reduce(0) { $0 + $1.tokens.total }
+        let removed = await index.setRoots(profileRoots(withB: false))
+        #expect(removed.changed.first { $0.id == "s2" }?.status == .ended)
+        #expect(await index.sessions.allSatisfy { $0.id != "s2" })
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+        _ = await index.setRoots(profileRoots())
+        #expect(await index.sessions.first { $0.id == "s2" }?.profileID == Self.pB)
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
+
+    @Test func duplicateIDKeepsNewestAndCountsOnce() async throws {
+        _ = seed()
+        let single = TranscriptIndex(roots: profileRoots(withB: false), cacheURL: tmp.url.appendingPathComponent("single.json"))
+        _ = await single.refreshAll(progress: nil)
+        let once = await single.buckets.reduce(0) { $0 + $1.tokens.total }
+        let copy = tmp.file("claude2/-Users-v-proj/s1.jsonl", text("claude-sample.jsonl"))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: copy.path)
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let s1 = await index.sessions.filter { $0.id == "s1" }
+        #expect(s1.count == 1)
+        #expect(s1.first?.profileID == Self.pB)
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == once)
+        #expect(await index.duplicateCount == 1)
+    }
+
+    @Test func codexLimitsPerProfile() async {
+        _ = seed()
+        let index = TranscriptIndex(roots: profileRoots(codex2: true), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.latestCodexLimits(profile: Self.pX)?.fiveHour?.usedPercent == 21)
+        #expect(await index.latestCodexLimits(profile: Self.pY) == nil)
+    }
+
+    private func transferFixture() async throws -> (TranscriptIndex, PendingTransfer, Int) {
+        _ = seed()
+        _ = tmp.file("claude/-Users-v-proj/s1/subagents/agent-a1.jsonl", #"{"type":"assistant","sessionId":"s1","cwd":"/Users/v/proj","timestamp":"2026-10-28T09:30:00.000Z","message":{"id":"sub1","model":"claude-haiku-5-5","stop_reason":"end_turn","content":[],"usage":{"input_tokens":7,"output_tokens":3}}}"# + "\n")
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let total = await index.buckets.reduce(0) { $0 + $1.tokens.total }
+        // Le radici dei test non finiscono in `projects`: i percorsi si calcolano a mano.
+        let src = tmp.url.appendingPathComponent("claude/-Users-v-proj").standardizedFileURL
+        let dst = tmp.url.appendingPathComponent("claude2/-Users-v-proj").standardizedFileURL
+        try FileManager.default.createDirectory(at: dst, withIntermediateDirectories: true)
+        for name in ["s1.jsonl", "s1"] {
+            try FileManager.default.copyItem(at: src.appendingPathComponent(name), to: dst.appendingPathComponent(name))
+        }
+        let t = PendingTransfer(sessionID: "s1", agent: .claude, from: Self.pA, to: Self.pB,
+                                sourcePaths: [src.appendingPathComponent("s1.jsonl").path, src.appendingPathComponent("s1").path],
+                                copiedPaths: [dst.appendingPathComponent("s1.jsonl").path, dst.appendingPathComponent("s1").path])
+        return (index, t, total)
+    }
+
+    @Test func transferDoesNotDoubleCount() async throws {
+        let (index, t, total) = try await transferFixture()
+        let begun = await index.beginTransfer(t)
+        #expect(begun.changed.first { $0.id == "s1" }?.profileID == Self.pB)
+        #expect(begun.changed.first { $0.id == "s1" }?.transcriptPath == t.copiedPaths[0])
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pB])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+        for path in t.sourcePaths { try FileManager.default.removeItem(atPath: path) }
+        _ = await index.endTransfer(t, confirmed: true)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pB])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
+
+    @Test func rollbackRestoresSource() async throws {
+        let (index, t, total) = try await transferFixture()
+        _ = await index.beginTransfer(t)
+        _ = await index.refreshAll(progress: nil)
+        for path in t.copiedPaths { try FileManager.default.removeItem(atPath: path) }
+        let ended = await index.endTransfer(t, confirmed: false)
+        #expect(ended.changed.first { $0.id == "s1" }?.profileID == Self.pA)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pA])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
+
+    /// La CLI scrive nella copia prima che il turno fallisca: annullando, l'origine non si riconta.
+    @Test func rollbackAfterCopyGrewDoesNotDoubleCount() async throws {
+        let (index, t, total) = try await transferFixture()
+        _ = await index.beginTransfer(t)
+        append(#"{"type":"user","sessionId":"s1","cwd":"/Users/v/proj","timestamp":"2026-10-28T11:00:00.000Z","uuid":"u99","message":{"role":"user","content":"continua"}}"# + "\n",
+               to: URL(fileURLWithPath: t.copiedPaths[0]))
+        _ = await index.refresh(paths: [t.copiedPaths[0]])
+        for path in t.copiedPaths { try FileManager.default.removeItem(atPath: path) }
+        _ = await index.endTransfer(t, confirmed: false)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pA])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
+
+    /// Belvedere chiuso a trasferimento aperto, con la cache salvata: all'avvio l'annullamento non riconta.
+    @Test func rollbackAfterRestartDoesNotDoubleCount() async throws {
+        let (index, t, total) = try await transferFixture()
+        _ = await index.beginTransfer(t)
+        append(#"{"type":"user","sessionId":"s1","cwd":"/Users/v/proj","timestamp":"2026-10-28T11:00:00.000Z","uuid":"u99","message":{"role":"user","content":"continua"}}"# + "\n",
+               to: URL(fileURLWithPath: t.copiedPaths[0]))
+        _ = await index.refresh(paths: [t.copiedPaths[0]])
+        try await index.save()
+        let restarted = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        for path in t.copiedPaths { try FileManager.default.removeItem(atPath: path) }
+        _ = await restarted.endTransfer(t, confirmed: false)
+        _ = await restarted.refreshAll(progress: nil)
+        #expect(await restarted.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pA])
+        #expect(await restarted.buckets.reduce(0) { $0 + $1.tokens.total } == total)
     }
 }

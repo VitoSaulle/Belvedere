@@ -12,6 +12,7 @@ struct SessionView: View {
                 SessionHeader(session: session, host: host)
                 Divider().opacity(0.4)
                 HostedTranscript(host: host)
+                ProfileTransferBar(session: session)
                 Composer(host: host, sessionID: session.id)
             }
         } else if let session = model.session(sessionID) {
@@ -19,6 +20,7 @@ struct SessionView: View {
                 SessionHeader(session: session, host: nil)
                 Divider().opacity(0.4)
                 TranscriptList(session: session)
+                ProfileTransferBar(session: session)
                 ReadOnlyBar(session: session)
             }
         } else {
@@ -130,6 +132,50 @@ struct ReadOnlyBar: View {
         .glassEffect(.regular, in: .capsule)
         .padding(.horizontal, 24)
         .padding(.bottom, 14)
+        .frame(maxWidth: 760)
+    }
+}
+
+/// Passaggio a un altro profilo dalla chat: proposto quando la sessione si ferma per il limite del piano,
+/// e la sessione nuova come ripiego se la conversazione non è passata.
+struct ProfileTransferBar: View {
+    @Environment(AppModel.self) private var model
+    let session: SessionSnapshot
+
+    var body: some View {
+        if let failure = model.transferFailure, failure.sessionID == session.id,
+           let target = model.profiles.profile(failure.profile) {
+            bar(icon: "exclamationmark.triangle.fill", tint: Theme.danger,
+                text: "Non sono riuscito a portare la conversazione in \(target.name).") {
+                Button("Apri una sessione nuova in \(Fmt.folder(failure.folder))") {
+                    model.startFresh(folder: failure.folder, profile: target.id)
+                }
+                .disabled(failure.folder.isEmpty)
+                Button("Chiudi") { model.transferFailure = nil }
+            }
+        } else if model.hitPlanLimit(session), model.canContinueElsewhere(session), let best = model.bestTarget(session) {
+            bar(icon: "gauge.with.dots.needle.100percent", tint: Theme.waiting,
+                text: "Limite del piano raggiunto con \(model.profile(of: session).name).") {
+                Button("Continua con \(best.name)") { Task { await model.continueIn(session.id, profile: best.id) } }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+            }
+        }
+    }
+
+    private func bar(icon: String, tint: Color, text: String, @ViewBuilder actions: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).foregroundStyle(tint)
+            Text(text).lineLimit(2)
+            Spacer(minLength: 8)
+            actions()
+        }
+        .font(.system(size: 12.5))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 8)
         .frame(maxWidth: 760)
     }
 }
