@@ -14,6 +14,10 @@ struct BelvedereApp: App {
         }
         .defaultSize(width: 1360, height: 860)
         .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Nuova sessione…") { delegate.model.showNewSession = true }
+                    .keyboardShortcut("n")
+            }
             CommandGroup(after: .sidebar) {
                 Button("Plancia") { delegate.model.route = .plancia }
                     .keyboardShortcut("0")

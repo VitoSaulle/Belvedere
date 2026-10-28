@@ -25,13 +25,23 @@ struct SidebarView: View {
             }
             .tag(Route.plancia)
 
-            Section("Sessioni") {
+            Section {
                 ForEach(model.sessions.prefix(12)) { session in
                     SessionRow(session: session).tag(Route.session(session.id))
                         .contextMenu { HideButton(sessionID: session.id) }
                 }
                 if model.sessions.isEmpty {
                     Text("Nessuna sessione").foregroundStyle(.secondary)
+                }
+            } header: {
+                HStack {
+                    Text("Sessioni")
+                    Spacer()
+                    Button { model.showNewSession = true } label: {
+                        Image(systemName: "plus").font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Nuova sessione (⌘N)")
                 }
             }
 

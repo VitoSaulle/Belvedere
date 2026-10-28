@@ -27,6 +27,9 @@ struct MainWindow: View {
         .sheet(isPresented: $model.showWelcome) {
             WelcomeSheet()
         }
+        .sheet(isPresented: $model.showNewSession) {
+            NewSessionSheet()
+        }
     }
 
     @ViewBuilder private var detail: some View {

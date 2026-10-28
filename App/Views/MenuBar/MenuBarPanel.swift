@@ -37,6 +37,10 @@ struct MenuBarPanel: View {
             }
             Divider().opacity(0.5)
             VStack(spacing: 2) {
+                MenuAction(title: "Nuova sessione", shortcut: "⌘N", systemImage: "plus") {
+                    model.showNewSession = true
+                    open(nil)
+                }
                 MenuAction(title: "Apri Belvedere", shortcut: "⌥⌘B", systemImage: "macwindow") { open(nil) }
                 MenuAction(title: "Statistiche", shortcut: nil, systemImage: "chart.bar.xaxis") { open(.stats) }
             }

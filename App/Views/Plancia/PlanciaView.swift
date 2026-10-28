@@ -62,6 +62,14 @@ struct PlanciaView: View {
             }
             Spacer()
             FilterPicker(selection: $filter)
+            Button { model.showNewSession = true } label: {
+                Label("Nuova sessione", systemImage: "plus")
+                    .font(.system(size: 12.5, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .tint(Theme.accent)
+            .help("Nuova sessione (⌘N)")
             Menu {
                 let stale = model.staleSessionIDs
                 Button("Nascondi le concluse da più di 7 giorni (\(stale.count))") { model.hide(stale) }

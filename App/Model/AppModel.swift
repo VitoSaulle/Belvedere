@@ -131,6 +131,7 @@ final class AppModel {
         // `open Belvedere.app --args -BelvedereOpenSession <id>` apre direttamente una sessione.
         if let id = UserDefaults.standard.string(forKey: "BelvedereOpenSession") { route = .session(id) }
         if UserDefaults.standard.bool(forKey: "BelvedereOpenStats") { route = .stats }
+        if UserDefaults.standard.bool(forKey: "BelvedereNewSession") { showNewSession = true }
         indexingProgress = 0
         let update = await index.refreshAll { [weak self] progress in
             Task { @MainActor in self?.indexingProgress = progress }
