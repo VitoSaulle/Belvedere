@@ -137,6 +137,30 @@ import Testing
         #expect(state.lastError == "Claude Code non trovato.")
     }
 
+    @Test func longStderrKeepsTheLastMeaningfulLines() {
+        var state = ChatState()
+        let stderr = """
+        node:internal/process: warning
+        Error: boom
+            at foo (/x.js:1:1)
+            at bar (/x.js:2:2)
+        Riga utile uno
+        Riga utile due
+
+        Messaggio finale
+        """
+        state.processExited(code: 1, stderr: stderr, now: now)
+        #expect(state.lastError == "Riga utile uno\nRiga utile due\nMessaggio finale")
+        #expect(state.errorDetail == stderr)
+    }
+
+    @Test func shortStderrHasNoDetail() {
+        var state = ChatState()
+        state.processExited(code: 1, stderr: "Invalid API key\n", now: now)
+        #expect(state.lastError == "Invalid API key")
+        #expect(state.errorDetail == nil)
+    }
+
     @Test func cleanExitHasNoError() {
         var state = ChatState()
         state.processExited(code: 0, stderr: "", now: now)

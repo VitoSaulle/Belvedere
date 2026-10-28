@@ -9,6 +9,7 @@ struct Composer: View {
     @State private var text = ""
     @State private var terminalOnly: String?
     @State private var files: [String] = []
+    @State private var showErrorDetail = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -180,10 +181,22 @@ struct Composer: View {
     // MARK: - Avvisi
 
     private func banner(_ error: String) -> some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
             Text(error).font(.system(size: 12.5)).lineLimit(3).textSelection(.enabled)
             Spacer()
+            if let detail = host.state.errorDetail {
+                Button("Dettagli") { showErrorDetail = true }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .popover(isPresented: $showErrorDetail) {
+                        ScrollView {
+                            Text(detail).font(.system(size: 11.5, design: .monospaced)).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        }
+                        .frame(width: 520, height: 320)
+                    }
+            }
             if !host.isRunning {
                 Button("Riavvia") { host.restart() }.buttonStyle(.bordered).buttonBorderShape(.capsule)
             }

@@ -22,7 +22,9 @@ public struct ChatState: Sendable {
     public var contextWindow: Int?
     public var costUSD: Double?
     public var limits: PlanLimits?
-    public var lastError: String?
+    /// Le righe utili dell'errore; `errorDetail` ha il testo completo quando è stato accorciato.
+    public var lastError: String? { didSet { errorDetail = nil } }
+    public var errorDetail: String?
     public var lastActivity: Date?
 
     public init(agent: AgentKind = .claude, isLocal: Bool = false, history: [TranscriptItem] = []) {
@@ -133,7 +135,20 @@ public struct ChatState: Sendable {
         lastActivity = now
         guard code != 0 else { return }
         let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        lastError = text.isEmpty ? "\(agent.productName) si è chiuso con il codice \(code)." : text
+        guard !text.isEmpty else {
+            lastError = "\(agent.productName) si è chiuso con il codice \(code)."
+            return
+        }
+        let summary = Self.errorSummary(text)
+        lastError = summary
+        if summary != text { errorDetail = stderr }
+    }
+
+    /// Le ultime 3 righe non vuote che non sono righe di uno stack (`at …`): il motivo sta in fondo.
+    static func errorSummary(_ text: String) -> String {
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("at ") }
+        return lines.suffix(3).joined(separator: "\n")
     }
 
     /// La sessione come la vedono Plancia, menu bar e notch; `nil` finché Claude non ha dato l'id.
