@@ -8,6 +8,8 @@ public struct ClaudeReducer: TranscriptReducer {
     private var pending: [String: UsageBucket] = [:]
     /// Subagente «fork»: le righe prima del suo primo messaggio utente sono copie della madre, già contate.
     private var inheritedContext = false
+    /// Somma di token × listino messaggio per messaggio, ognuno col suo modello; `nil` se nessuno ha un listino.
+    private var estimatedCost: Double?
 
     public init(transcriptPath: String) {
         let id = ((transcriptPath as NSString).lastPathComponent as NSString).deletingPathExtension
@@ -37,7 +39,7 @@ public struct ClaudeReducer: TranscriptReducer {
         case "ai-title":
             if let title = obj["aiTitle"] as? String, !title.isEmpty { snapshot.title = title }
         case "cost-state":
-            if let cost = (obj["totalCostUSD"] as? NSNumber)?.doubleValue { snapshot.costUSD = cost }
+            if estimatedCost == nil, let cost = (obj["totalCostUSD"] as? NSNumber)?.doubleValue { snapshot.costUSD = cost }
         case "fork-context-ref":
             inheritedContext = true
         default: break
@@ -67,6 +69,10 @@ public struct ClaudeReducer: TranscriptReducer {
                                      cacheRead: Self.int(usage["cache_read_input_tokens"]),
                                      cacheWrite: Self.int(usage["cache_creation_input_tokens"]))
             snapshot.tokens += tokens
+            if let model, let cost = ModelPricing.cost(model: model, tokens: tokens) {
+                estimatedCost = (estimatedCost ?? 0) + cost
+                snapshot.costUSD = estimatedCost
+            }
             let context = tokens.input + tokens.cacheRead + tokens.cacheWrite
             snapshot.contextTokens = context
             // Il log non dice la finestra: se il contesto supera quella standard, è la variante da 1M.

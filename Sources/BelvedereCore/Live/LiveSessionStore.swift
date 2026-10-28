@@ -215,7 +215,7 @@ public struct LiveSessionStore: Sendable {
                     s.contextTokens = Int((percent / 100 * Double(size)).rounded())
                 }
             }
-            if let cost = line.payload.costUSD { s.costUSD = cost }
+            if s.costUSD == nil, let cost = line.payload.costUSD { s.costUSD = cost }
         }
         let quiet = now.timeIntervalSince(s.lastActivity ?? .distantPast)
         if s.status == .working, quiet > Self.workingTimeout { s.status = .idle }
@@ -234,7 +234,7 @@ public struct LiveSessionStore: Sendable {
             if let model = live.model { s.model = model }
             if let tokens = live.contextTokens { s.contextTokens = tokens }
             if let window = live.contextWindow { s.contextWindow = window }
-            if let cost = live.costUSD { s.costUSD = cost }
+            if s.costUSD == nil, let cost = live.costUSD { s.costUSD = cost }
             if live.isLocalModel { s.isLocalModel = true }
             if let text = live.lastText { s.lastText = text }
             if s.cwd.isEmpty { s.cwd = live.cwd }

@@ -46,7 +46,8 @@ import Testing
     @Test func readsTitleCostBranchModel() {
         let s = reduced(all).snapshot
         #expect(s.title == "Export CSV dei report")
-        #expect(s.costUSD == 4.18)
+        // Token × listino di Opus 5.5, non il `cost-state` della CLI (4,18), che riparte da zero dopo una compattazione.
+        #expect(abs((s.costUSD ?? 0) - 0.007972) < 1e-9)
         #expect(s.gitBranch == "feat/csv")
         #expect(s.model == "claude-opus-5-5")
         #expect(s.isLocalModel == false)

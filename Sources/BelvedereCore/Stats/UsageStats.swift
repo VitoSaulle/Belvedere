@@ -81,8 +81,6 @@ public enum UsageStats {
         var byAgent: [AgentKind: Int] = [:]
         for agent in agentOf.values { byAgent[agent, default: 0] += 1 }
 
-        let costs = Dictionary(sessions.compactMap { s in s.costUSD.map { (s.id, $0) } }, uniquingKeysWith: { a, _ in a })
-
         var perDay: [String: (claude: Int, codex: Int, local: Int)] = [:]
         for b in selected {
             var entry = perDay[b.day] ?? (0, 0, 0)
@@ -97,7 +95,7 @@ public enum UsageStats {
         }
 
         let projects = Dictionary(grouping: selected, by: \.project).map { name, list in
-            projectUsage(name, list, costs: costs)
+            projectUsage(name, list)
         }.sorted { $0.tokens != $1.tokens ? $0.tokens > $1.tokens : $0.project < $1.project }
 
         var tools: [String: Int] = [:]
@@ -107,7 +105,7 @@ public enum UsageStats {
 
         return StatsSummary(totalTokens: total,
                             previousPeriodTokens: previous.reduce(0) { $0 + $1.tokens.total },
-                            costUSD: cost(of: Set(agentOf.keys), costs: costs),
+                            costUSD: cost(of: selected),
                             sessions: agentOf.count,
                             sessionsByAgent: byAgent,
                             localSessions: localIDs.count,
@@ -117,7 +115,7 @@ public enum UsageStats {
                             topTools: topTools)
     }
 
-    private static func projectUsage(_ name: String, _ list: [UsageBucket], costs: [String: Double]) -> ProjectUsage {
+    private static func projectUsage(_ name: String, _ list: [UsageBucket]) -> ProjectUsage {
         let tokens = list.reduce(TokenTotals.zero) { $0 + $1.tokens }
         let total = tokens.total
         let share = { (match: (UsageBucket) -> Bool) in
@@ -128,15 +126,17 @@ public enum UsageStats {
                             sessions: ids.count,
                             tokens: total,
                             cacheRatio: ratio(tokens.cacheRead, tokens.input + tokens.cacheRead + tokens.cacheWrite),
-                            costUSD: cost(of: ids, costs: costs),
+                            costUSD: cost(of: list),
                             claudeShare: share { !$0.isLocal && $0.agent == .claude },
                             codexShare: share { !$0.isLocal && $0.agent == .codex },
                             localShare: share(\.isLocal))
     }
 
-    /// Somma dei costi riportati da Claude Code; `nil` se nessuna sessione ne ha (niente listini inventati).
-    private static func cost(of ids: Set<String>, costs: [String: Double]) -> Double? {
-        let known = ids.compactMap { costs[$0] }
+    /// «Stima API»: token del periodo × listino del modello. Il costo che Claude Code scrive per sessione
+    /// riparte da zero dopo una compattazione o una ripresa, e copre l'intera sessione anche in «Oggi».
+    /// `nil` se nessun modello del periodo ha un listino noto; i locali non costano.
+    private static func cost(of list: [UsageBucket]) -> Double? {
+        let known = list.filter { !$0.isLocal }.compactMap { ModelPricing.cost(model: $0.model, tokens: $0.tokens) }
         return known.isEmpty ? nil : known.reduce(0, +)
     }
 

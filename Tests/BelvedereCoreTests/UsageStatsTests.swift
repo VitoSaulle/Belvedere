@@ -11,8 +11,9 @@ import Testing
     var now: Date { calendar.date(from: DateComponents(year: 2026, month: 10, day: 28, hour: 12))! }
 
     func bucket(_ day: String, _ session: String, _ agent: AgentKind, _ project: String, local: Bool = false,
-                input: Int, cacheRead: Int = 0, output: Int = 0, tools: [String: Int] = [:]) -> UsageBucket {
-        UsageBucket(day: day, sessionID: session, agent: agent, project: project, model: local ? "qwen" : "m",
+                input: Int, cacheRead: Int = 0, output: Int = 0, tools: [String: Int] = [:],
+                model: String = "m") -> UsageBucket {
+        UsageBucket(day: day, sessionID: session, agent: agent, project: project, model: local ? "qwen" : model,
                     isLocal: local, tokens: TokenTotals(input: input, output: output, cacheRead: cacheRead),
                     toolCounts: tools)
     }
@@ -41,7 +42,7 @@ import Testing
         #expect(s.sessions == 3)
         #expect(s.sessionsByAgent == [.claude: 2, .codex: 1])
         #expect(s.localSessions == 1)
-        #expect(s.costUSD == 2.5)
+        #expect(s.costUSD == nil)
         #expect(s.localShare == 0.2)
         #expect(s.days.count == 14)
         #expect(s.days.first?.day == "2026-10-15")
@@ -74,5 +75,20 @@ import Testing
         #expect(today.totalTokens == 200)
         #expect(today.previousPeriodTokens == 300)
         #expect(today.days.map(\.day) == ["2026-10-28"])
+    }
+
+    /// La stima viene dai token del periodo per il listino del modello, non dal costo che la CLI scrive
+    /// per sessione (che riparte da zero dopo una compattazione o una ripresa).
+    @Test func costIsTokensTimesPriceForThePeriod() throws {
+        let list = [
+            bucket("2026-10-27", "o1", .claude, "/a", input: 1_000_000, model: "claude-opus-5-5"),
+            bucket("2026-10-28", "o1", .claude, "/a", input: 1_000_000, output: 100_000, model: "claude-opus-5-5"),
+            bucket("2026-10-28", "x1", .codex, "/b", input: 1_000_000, model: "gpt-5.3-codex"),
+        ]
+        var stale = SessionSnapshot(id: "o1", agent: .claude, cwd: "/a")
+        stale.costUSD = 0
+        let today = UsageStats.summarize(buckets: list, sessions: [stale], range: .today, project: nil, now: now, calendar: calendar)
+        #expect(abs((today.costUSD ?? 0) - 6) < 1e-9, "\(String(describing: today.costUSD))")
+        #expect(today.projects.first { $0.project == "/b" }?.costUSD == nil)
     }
 }

@@ -67,7 +67,7 @@ public actor TranscriptIndex {
     static let tombstoneLifetime: TimeInterval = 24 * 3600
 
     /// Da aumentare quando cambia il modo in cui i riduttori leggono i log: la cache vecchia si ricostruisce.
-    static let cacheVersion = 6
+    static let cacheVersion = 7
 
     struct Cache: Codable {
         var version = TranscriptIndex.cacheVersion
