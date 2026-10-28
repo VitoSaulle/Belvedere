@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(Updater.self) private var updater
     @AppStorage(NotchController.enabledKey) private var notchEnabled = true
     @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
     @State private var error: String?
@@ -71,6 +72,22 @@ struct SettingsView: View {
                 }
                 if let loginError {
                     Text(loginError).font(.callout).foregroundStyle(Theme.danger)
+                }
+            }
+
+            Section("Aggiornamenti") {
+                if updater.isAvailable {
+                    Toggle("Controlla automaticamente", isOn: Binding(get: { updater.checksAutomatically },
+                                                                      set: { updater.checksAutomatically = $0 }))
+                    LabeledContent("Versione \(Updater.versionText)") {
+                        Button("Controlla ora") { updater.checkForUpdates() }
+                            .disabled(!updater.canCheck)
+                    }
+                } else {
+                    LabeledContent("Versione", value: Updater.versionText)
+                    Text("Gli aggiornamenti automatici ci sono solo nelle versioni scaricate da GitHub.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
             }
 

@@ -2,6 +2,7 @@
 # Segreti del repo (li imposta il proprietario, non compaiono mai nei log):
 #   ASC_KEY_ID, ASC_ISSUER_ID  – chiave API di App Store Connect, ruolo Admin
 #   ASC_KEY_P8                 – contenuto del file AuthKey_<id>.p8
+#   SPARKLE_ED_PRIVATE_KEY     – chiave privata EdDSA di Sparkle (generate_keys -x); la pubblica è in project.yml
 name: Release
 
 on:
@@ -29,15 +30,18 @@ jobs:
         run: brew install xcodegen
       - name: Test
         run: scripts/t.sh
-      - name: Chiave API
+      - name: Chiavi
         env:
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           umask 077
           printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          [ -n "$SPARKLE_ED_PRIVATE_KEY" ] && printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key" || echo "::warning::SPARKLE_ED_PRIVATE_KEY assente: release senza aggiornamenti automatici"
       - name: Firma, notarizzazione e DMG
         env:
           ASC_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          SPARKLE_KEY_FILE: ${{ runner.temp }}/sparkle.key
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           VERSION: ${{ github.ref_name }}
@@ -47,13 +51,15 @@ jobs:
           scripts/release.sh
       - name: Log in caso di errore
         if: failure()
-        run: tail -60 .superpowers/release-last.log | grep -v -i -E "authenticationKey|AuthKey" || true
+        run: tail -60 .superpowers/release-last.log | grep -v -i -E "authenticationKey|AuthKey|ed-key-file" || true
       - name: Release su GitHub
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" build/release/Belvedere-*.dmg \
+          set -- build/release/Belvedere-*.dmg
+          [ -f build/release/appcast.xml ] && set -- "$@" build/release/appcast.xml
+          gh release create "$GITHUB_REF_NAME" "$@" \
             --title "Belvedere ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag
       - name: Via la chiave
         if: always()
-        run: rm -f "$RUNNER_TEMP/AuthKey.p8"
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8" "$RUNNER_TEMP/sparkle.key"

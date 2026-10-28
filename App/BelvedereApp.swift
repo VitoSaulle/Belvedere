@@ -15,6 +15,12 @@ struct BelvedereApp: App {
         }
         .defaultSize(width: 1360, height: 860)
         .commands {
+            CommandGroup(after: .appInfo) {
+                if delegate.updater.isAvailable {
+                    Button("Controlla aggiornamenti…") { delegate.updater.checkForUpdates() }
+                        .disabled(!delegate.updater.canCheck)
+                }
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Nuova sessione…") { delegate.model.showNewSession = true }
                     .keyboardShortcut("n")
@@ -36,6 +42,7 @@ struct BelvedereApp: App {
         Settings {
             SettingsView()
                 .environment(delegate.model)
+                .environment(delegate.updater)
         }
 
         // Anteprima del pannello della menu bar in una finestra: `--args -BelvedereShowPanel YES`.
@@ -61,6 +68,7 @@ struct BelvedereApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    let updater = Updater()
     private var hotKey: GlobalHotKey?
     private var notch: NotchController?
 

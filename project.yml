@@ -7,6 +7,9 @@ options:
 packages:
   BelvedereCore:
     path: .
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.10.1
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -23,6 +26,8 @@ targets:
     dependencies:
       - package: BelvedereCore
         product: BelvedereCore
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: it.vitosaulle.Belvedere
@@ -35,6 +40,8 @@ targets:
         # Le release le sovrascrivono: la versione viene dal tag (v0.2.0 → 0.2.0), la build dal numero dell'esecuzione.
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
+        # Aggiornamenti con Sparkle: chiave pubblica EdDSA (generate_keys). Vuota = aggiornamenti spenti.
+        SPARKLE_PUBLIC_KEY: ""
       configs:
         # Distribuzione fuori dallo Store: firma del team, hardened runtime per la notarizzazione.
         Release:
