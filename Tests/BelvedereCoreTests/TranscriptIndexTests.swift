@@ -367,4 +367,34 @@ extension TranscriptIndexTests {
         #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pA])
         #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
     }
+
+    /// La CLI scrive nella copia prima che il turno fallisca: annullando, l'origine non si riconta.
+    @Test func rollbackAfterCopyGrewDoesNotDoubleCount() async throws {
+        let (index, t, total) = try await transferFixture()
+        _ = await index.beginTransfer(t)
+        append(#"{"type":"user","sessionId":"s1","cwd":"/Users/v/proj","timestamp":"2026-10-28T11:00:00.000Z","uuid":"u99","message":{"role":"user","content":"continua"}}"# + "\n",
+               to: URL(fileURLWithPath: t.copiedPaths[0]))
+        _ = await index.refresh(paths: [t.copiedPaths[0]])
+        for path in t.copiedPaths { try FileManager.default.removeItem(atPath: path) }
+        _ = await index.endTransfer(t, confirmed: false)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pA])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
+
+    /// Belvedere chiuso a trasferimento aperto, con la cache salvata: all'avvio l'annullamento non riconta.
+    @Test func rollbackAfterRestartDoesNotDoubleCount() async throws {
+        let (index, t, total) = try await transferFixture()
+        _ = await index.beginTransfer(t)
+        append(#"{"type":"user","sessionId":"s1","cwd":"/Users/v/proj","timestamp":"2026-10-28T11:00:00.000Z","uuid":"u99","message":{"role":"user","content":"continua"}}"# + "\n",
+               to: URL(fileURLWithPath: t.copiedPaths[0]))
+        _ = await index.refresh(paths: [t.copiedPaths[0]])
+        try await index.save()
+        let restarted = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        for path in t.copiedPaths { try FileManager.default.removeItem(atPath: path) }
+        _ = await restarted.endTransfer(t, confirmed: false)
+        _ = await restarted.refreshAll(progress: nil)
+        #expect(await restarted.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pA])
+        #expect(await restarted.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
 }

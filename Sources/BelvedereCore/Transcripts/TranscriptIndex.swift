@@ -146,7 +146,7 @@ public actor TranscriptIndex {
     }
 
     private func liveTopLevel() -> [(key: String, value: Entry)] {
-        entries.filter { $0.value.parentSessionID == nil && $0.value.goneAt == nil }.map { ($0.key, $0.value) }
+        entries.filter { $0.value.parentSessionID == nil && $0.value.goneAt == nil && !isIgnored($0.key) }.map { ($0.key, $0.value) }
     }
 
     /// Per ogni id, il percorso del file più recente.
@@ -205,7 +205,8 @@ public actor TranscriptIndex {
         let foundPaths = Set(found.map(\.path))
         var changed: [SessionSnapshot] = []
         var newBuckets: [UsageBucket] = []
-        for path in entries.keys where !foundPaths.contains(path) {
+        // Le origini di un trasferimento aperto non si vedono ma non sono sparite: niente lapide.
+        for path in entries.keys where !foundPaths.contains(path) && !isIgnored(path) {
             if let ended = endSession(path) { changed.append(ended) }
         }
         let now = Date()
@@ -300,36 +301,34 @@ public actor TranscriptIndex {
 
     // MARK: - Trasferimenti
 
-    /// La conversazione passa al profilo di destinazione: le voci (offset e riduttore) si spostano
+    /// La conversazione passa al profilo di destinazione: le voci (offset e riduttore) si copiano
     /// sui file copiati, così niente viene riletto o contato due volte, e l'origine si ignora.
+    /// Le voci dell'origine restano intatte: un annullamento (anche dopo un riavvio) torna a loro.
     public func beginTransfer(_ t: PendingTransfer) -> IndexUpdate {
         loadIfNeeded()
         ignored.formUnion(t.sourcePaths)
-        move(from: t.sourcePaths, to: t.copiedPaths)
-        return update(for: t.copiedPaths[0])
-    }
-
-    /// Chiude il trasferimento. Confermato: le voci dell'origine non servono più. Annullato: tornano all'origine.
-    public func endTransfer(_ t: PendingTransfer, confirmed: Bool) -> IndexUpdate {
-        loadIfNeeded()
-        ignored.subtract(t.sourcePaths)
-        if confirmed {
-            for path in Array(entries.keys) where Self.isUnder(path, any: t.sourcePaths) { entries.removeValue(forKey: path) }
-            dirty = true
-            return update(for: t.copiedPaths[0])
-        }
-        move(from: t.copiedPaths, to: t.sourcePaths)
-        return update(for: t.sourcePaths[0])
-    }
-
-    private func move(from sources: [String], to targets: [String]) {
-        for (src, dst) in zip(sources, targets) {
-            for path in Array(entries.keys) where path == src || path.hasPrefix(src + "/") {
-                guard let entry = entries.removeValue(forKey: path) else { continue }
+        for (src, dst) in zip(t.sourcePaths, t.copiedPaths) {
+            for (path, entry) in entries where path == src || path.hasPrefix(src + "/") {
                 entries[dst + path.dropFirst(src.count)] = entry
             }
         }
         dirty = true
+        return update(for: t.copiedPaths[0])
+    }
+
+    /// Chiude il trasferimento. Confermato: le voci dell'origine non servono più. Annullato: via quelle della copia,
+    /// che può essere cresciuta, e restano quelle dell'origine così com'erano.
+    public func endTransfer(_ t: PendingTransfer, confirmed: Bool) -> IndexUpdate {
+        loadIfNeeded()
+        ignored.subtract(t.sourcePaths)
+        let dropped = confirmed ? t.sourcePaths : t.copiedPaths
+        for path in Array(entries.keys) where Self.isUnder(path, any: dropped) { entries.removeValue(forKey: path) }
+        dirty = true
+        return update(for: confirmed ? t.copiedPaths[0] : t.sourcePaths[0])
+    }
+
+    private func isIgnored(_ path: String) -> Bool {
+        !ignored.isEmpty && Self.isUnder(path, any: Array(ignored))
     }
 
     private func update(for path: String) -> IndexUpdate {
@@ -365,7 +364,7 @@ public actor TranscriptIndex {
     private func classify(_ url: URL) -> Kind? {
         guard url.pathExtension == "jsonl" else { return nil }
         let path = url.standardizedFileURL.path
-        if !ignored.isEmpty, Self.isUnder(path, any: Array(ignored)) { return nil }
+        if isIgnored(path) { return nil }
         for root in roots.roots {
             guard let rel = TranscriptRoots.relative(path, to: root.url) else { continue }
             switch root.agent {

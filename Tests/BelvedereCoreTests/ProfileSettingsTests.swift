@@ -28,7 +28,8 @@ import Testing
     }
 
     @Test func emptyEnvIsDropped() {
-        let out = ProfileSettings.filteredClaudeSettings(["env": ["GITHUB_AUTH": "x"], "model": "opus"], port: port)
+        let out = ProfileSettings.filteredClaudeSettings(["env": ["GITHUB_AUTH": "x", "ANTHROPIC_CUSTOM_HEADERS": "Authorization: Bearer t"],
+                                                          "model": "opus"], port: port)
         #expect(Set(out.keys) == ["model"])
     }
 

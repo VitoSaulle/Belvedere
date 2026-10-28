@@ -184,9 +184,11 @@ final class AppModel {
 
         startWatcher()
         // Trasferimenti rimasti aperti da un'esecuzione precedente: la copia sparisce, l'origine resta.
+        // Se l'origine non c'è più la conferma si era fermata a metà: la copia è l'unica rimasta e vale come confermata.
         for transfer in ProfileTransfer.load() {
+            let sourceExists = FileManager.default.fileExists(atPath: transfer.sourcePaths[0])
             ProfileTransfer.rollback(transfer)
-            _ = await index.endTransfer(transfer, confirmed: false)
+            _ = await index.endTransfer(transfer, confirmed: !sourceExists)
         }
         try? ProfileTransfer.save([])
 
@@ -229,8 +231,9 @@ final class AppModel {
 
     /// Collegato = tutti i profili Claude (con la cartella sul disco) hanno hook e status line.
     func refreshHooksInstalled() {
+        // Il predefinito conta anche senza cartella: senza `~/.claude` Belvedere non è collegato.
         unconnectedProfiles = profiles.profiles(.claude).filter { p in
-            !profileFolderMissing(p)
+            (p.isDefault || !profileFolderMissing(p))
                 && !((try? ClaudeSettingsInstaller.isInstalled(SettingsFile(profile: p).read(), port: Belvedere.defaultPort)) ?? false)
         }
         hooksInstalled = unconnectedProfiles.isEmpty
@@ -245,7 +248,7 @@ final class AppModel {
     func connectClaude() throws {
         let helpers = try ClaudeSettingsInstaller.installHelpers(from: .main)
         var failure: Error?
-        for p in profiles.profiles(.claude) where !profileFolderMissing(p) {
+        for p in profiles.profiles(.claude) where p.isDefault || !profileFolderMissing(p) {
             do { try connect(p, helpers: helpers) } catch { failure = failure ?? error }
         }
         refreshHooksInstalled()
@@ -696,8 +699,15 @@ final class AppModel {
         Belvedere.supportDirectory.appendingPathComponent("handoff/\(id).pid")
     }
 
+    /// Una conversazione che sta passando a un altro profilo: finché non risponde, resta in Belvedere.
+    func isTransferring(_ sessionID: String) -> Bool {
+        openTransfers.contains { $0.sessionID == sessionID }
+    }
+
     /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume` o `codex resume`.
     func openInTerminal(_ sessionID: String) async {
+        // Fermare la chat annullerebbe il trasferimento e cancellerebbe la copia che il terminale sta per riprendere.
+        guard !isTransferring(sessionID) else { return }
         let host = host(for: sessionID)
         // Senza id (nessun messaggio ancora inviato) non c'è niente da riprendere nel terminale.
         guard let s = host?.state.snapshot(launchedAt: host?.launchedAt) ?? session(sessionID),

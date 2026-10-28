@@ -5,7 +5,8 @@ public enum ProfileSettings {
     /// Chiavi che portano credenziali o forzano l'account: non passano mai a un altro profilo.
     static let droppedKeys: Set<String> = ["apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "otelHeadersHelper",
                                            "forceLoginMethod", "forceLoginOrgUUID"]
-    static let droppedEnvFragments = ["KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH"]
+    /// `HEADER`: `ANTHROPIC_CUSTOM_HEADERS` porta spesso `Authorization: Bearer …` verso un gateway.
+    static let droppedEnvFragments = ["KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH", "HEADER"]
     static let droppedEnv: Set<String> = ["ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"]
 
     /// `settings.json` del predefinito senza credenziali e senza le voci di Belvedere,

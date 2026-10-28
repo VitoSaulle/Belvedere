@@ -51,6 +51,16 @@ import Testing
         #expect(exists("A/projects/-p/s1.jsonl"))
     }
 
+    /// L'origine è già stata cancellata (conferma a metà): annullare non deve togliere l'unica copia rimasta.
+    @Test func rollbackKeepsCopyWhenSourceIsGone() throws {
+        let file = tmp.file("A/projects/-p/s1.jsonl", "{}\n")
+        let t = try ProfileTransfer.begin(transcriptPath: file.path, sessionID: "s1", agent: .claude,
+                                          from: profile("A"), to: profile("B"))
+        try ProfileTransfer.confirm(t)
+        ProfileTransfer.rollback(t)
+        #expect(exists("B/projects/-p/s1.jsonl"))
+    }
+
     @Test func destinationExistsThrows() throws {
         let file = tmp.file("A/projects/-p/s1.jsonl", "{}\n")
         _ = tmp.file("B/projects/-p/s1.jsonl", "altro\n")

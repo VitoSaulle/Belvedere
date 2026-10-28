@@ -68,7 +68,9 @@ public enum ProfileTransfer {
     }
 
     /// Fallito o abbandonato: via la copia, l'origine non è mai stata toccata.
+    /// Se l'origine non c'è più (conferma interrotta a metà), la copia è l'unica rimasta e resta.
     public static func rollback(_ t: PendingTransfer, fileManager fm: FileManager = .default) {
+        guard fm.fileExists(atPath: t.sourcePaths[0]) else { return }
         for path in t.copiedPaths { try? fm.removeItem(atPath: path) }
     }
 
