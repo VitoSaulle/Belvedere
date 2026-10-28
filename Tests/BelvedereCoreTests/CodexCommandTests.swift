@@ -58,4 +58,21 @@ import Testing
         #expect(LaunchAdvice.contextWarning(32768, agent: .codex) == "Contesto di 32.768 token: Codex ne usa circa 9k solo per istruzioni e strumenti.")
         #expect(LaunchAdvice.contextWarning(32768, agent: .claude)?.contains("Claude Code ne usa circa 20k") == true)
     }
+
+    // MARK: - Profili
+
+    @Test func profileEnvironment() {
+        let extra = Profile(name: "L", agent: .codex, configDir: "/Users/v/.codex-l")
+        let main = Profile(name: "Principale", agent: .codex, configDir: "/Users/v/.codex", isDefault: true)
+        let base = ["CODEX_HOME": "/x", "PATH": "/bin"]
+        #expect(CodexCommand.environment(base: base, profile: extra)["CODEX_HOME"] == "/Users/v/.codex-l")
+        #expect(CodexCommand.environment(base: base, profile: main)["CODEX_HOME"] == nil)
+        #expect(CodexCommand.environment(base: base, profile: nil)["CODEX_HOME"] == nil)
+        #expect(CodexCommand.environment(base: base, profile: extra)["PATH"] == "/bin")
+        #expect(CodexCommand.preview(LaunchOptions(folder: "/p", agent: .codex), profile: extra)
+            .hasPrefix("cd '/p' && CODEX_HOME='/Users/v/.codex-l' codex"))
+        let script = TerminalHandoff.loginScript(profile: extra, binary: "/bin/codex")
+        #expect(script.contains("export CODEX_HOME='/Users/v/.codex-l'"))
+        #expect(script.hasSuffix("exec '/bin/codex' 'login'\n"))
+    }
 }

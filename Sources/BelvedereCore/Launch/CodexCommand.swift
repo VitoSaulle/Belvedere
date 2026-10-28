@@ -38,9 +38,15 @@ public enum CodexCommand {
         return .object(params)
     }
 
+    /// Ambiente del processo: `CODEX_HOME` del profilo, mai quello ereditato.
+    public static func environment(base: [String: String], profile: Profile?) -> [String: String] {
+        ClaudeCommand.profileEnvironment(base, key: "CODEX_HOME", profile: profile)
+    }
+
     /// Comando equivalente da terminale.
-    public static func preview(_ o: LaunchOptions) -> String {
-        (["cd \(ClaudeCommand.quote(o.folder)) && codex"] + choiceArguments(o).map(ClaudeCommand.quoteIfNeeded))
+    public static func preview(_ o: LaunchOptions, profile: Profile? = nil) -> String {
+        (["cd \(ClaudeCommand.quote(o.folder)) && \(ClaudeCommand.profilePrefix(profile))codex"]
+            + choiceArguments(o).map(ClaudeCommand.quoteIfNeeded))
             .joined(separator: " ")
     }
 

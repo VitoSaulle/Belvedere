@@ -176,4 +176,33 @@ import Testing
         #expect(preset.options.permission == .ask)
         #expect(preset.options.resumeID == nil)
     }
+
+    // MARK: - Profili
+
+    static let extra = Profile(name: "L", agent: .claude, configDir: "/Users/v/.claude-l")
+    static let main = Profile(name: "Principale", agent: .claude, configDir: "/Users/v/.claude", isDefault: true)
+
+    @Test func profileEnvironment() {
+        let base = ["CLAUDE_CONFIG_DIR": "/x", "PATH": "/bin"]
+        let o = LaunchOptions(folder: "/p")
+        #expect(ClaudeCommand.environment(o, base: base, profile: Self.extra)["CLAUDE_CONFIG_DIR"] == "/Users/v/.claude-l")
+        #expect(ClaudeCommand.environment(o, base: base, profile: Self.main)["CLAUDE_CONFIG_DIR"] == nil)
+        #expect(ClaudeCommand.environment(o, base: base, profile: nil)["CLAUDE_CONFIG_DIR"] == nil)
+        #expect(ClaudeCommand.environment(o, base: base, profile: Self.extra)["PATH"] == "/bin")
+    }
+
+    @Test func previewShowsProfile() {
+        let p = Profile(name: "A", agent: .claude, configDir: "/tmp/a b")
+        let preview = ClaudeCommand.preview(LaunchOptions(folder: "/p"), isGitRepository: false, profile: p)
+        #expect(preview.hasPrefix("cd '/p' && CLAUDE_CONFIG_DIR='/tmp/a b' claude"))
+        #expect(!ClaudeCommand.preview(LaunchOptions(folder: "/p"), isGitRepository: false, profile: Self.main).contains("CLAUDE_CONFIG_DIR"))
+    }
+
+    @Test func loginScript() {
+        let script = TerminalHandoff.loginScript(profile: Self.extra, binary: "/bin/claude")
+        #expect(script.hasPrefix("#!/bin/zsh\n"))
+        #expect(script.contains("export CLAUDE_CONFIG_DIR='/Users/v/.claude-l'"))
+        #expect(script.hasSuffix("exec '/bin/claude' '/login'\n"))
+        #expect(!TerminalHandoff.loginScript(profile: Self.main, binary: "/bin/claude").contains("export"))
+    }
 }
