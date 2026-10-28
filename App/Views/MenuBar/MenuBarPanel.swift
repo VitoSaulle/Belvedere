@@ -15,6 +15,7 @@ struct MenuBarPanel: View {
                 section("Aspettano te")
                 ForEach(waiting.prefix(3)) { session in
                     WaitingCard(session: session) { open(.session(session.id)) }
+                        .contextMenu { HideButton(sessionID: session.id) }
                 }
             }
             let live = model.sessions.filter { $0.status == .working || ($0.status == .done && isRecent($0)) }
@@ -24,6 +25,7 @@ struct MenuBarPanel: View {
                     ForEach(live.prefix(5)) { session in
                         Button { open(.session(session.id)) } label: { LiveRow(session: session) }
                             .buttonStyle(.plain)
+                            .contextMenu { HideButton(sessionID: session.id) }
                     }
                 }
             }

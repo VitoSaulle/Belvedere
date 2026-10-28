@@ -5,7 +5,11 @@ import Observation
 /// Stato dell'app: unisce indice dei log, hook e status line e li espone all'interfaccia.
 @MainActor @Observable
 final class AppModel {
+    /// Sessioni visibili: tutte meno quelle nascoste. Plancia, sidebar, menu bar e notch usano queste.
     var sessions: [SessionSnapshot] = []
+    /// Tutte le sessioni, nascoste comprese: statistiche e apertura per id.
+    private(set) var allSessions: [SessionSnapshot] = []
+    private(set) var hidden = HiddenSessions()
     var planLimits: PlanLimits?
     var lmStudio: LMStudioStatus?
     var feed: [ActivityEvent] = []
@@ -51,7 +55,40 @@ final class AppModel {
     var waitingCount: Int { sessions.filter { $0.status == .waiting }.count }
     var workingCount: Int { sessions.filter { $0.status == .working }.count }
 
-    func session(_ id: String) -> SessionSnapshot? { sessions.first { $0.id == id } }
+    func session(_ id: String) -> SessionSnapshot? { allSessions.first { $0.id == id } }
+
+    var hiddenSessions: [SessionSnapshot] { allSessions.filter { hidden.isHidden($0) } }
+
+    /// Sessioni concluse da più di una settimana che si possono nascondere in blocco.
+    var staleSessionIDs: [String] { HiddenSessions.staleIDs(sessions, olderThanDays: 7, now: Date()) }
+
+    // MARK: - Sessioni nascoste
+
+    func hide(_ ids: [String]) {
+        let now = Date()
+        for id in ids { hidden.hide(id, at: max(now, session(id)?.lastActivity ?? now)) }
+        saveHidden()
+        publish()
+    }
+
+    func unhide(_ id: String) {
+        hidden.unhide(id)
+        saveHidden()
+        publish()
+    }
+
+    private static var hiddenURL: URL { Belvedere.supportDirectory.appendingPathComponent("hidden.json") }
+
+    private func loadHidden() {
+        guard let data = try? Data(contentsOf: Self.hiddenURL),
+              let saved = try? JSONDecoder().decode(HiddenSessions.self, from: data) else { return }
+        hidden = saved
+    }
+
+    private func saveHidden() {
+        try? FileManager.default.createDirectory(at: Belvedere.supportDirectory, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(hidden).write(to: Self.hiddenURL, options: .atomic)
+    }
 
     // MARK: - Avvio
 
@@ -59,6 +96,7 @@ final class AppModel {
         guard !started else { return }
         started = true
         refreshHooksInstalled()
+        loadHidden()
         if let data = UserDefaults.standard.data(forKey: Self.limitsKey),
            let saved = try? JSONDecoder().decode(PlanLimits.self, from: data) {
             store.apply(claudeLimits: saved)
@@ -173,7 +211,7 @@ final class AppModel {
     }
 
     func stats(range: StatsRange, project: String?) -> StatsSummary {
-        UsageStats.summarize(buckets: buckets, sessions: sessions, range: range, project: project,
+        UsageStats.summarize(buckets: buckets, sessions: allSessions, range: range, project: project,
                              now: Date(), calendar: .current)
     }
 
@@ -265,8 +303,10 @@ final class AppModel {
 
     private func publish() {
         let next = store.sessions
-        if feedReady { addToFeed(ActivityFeed.events(from: sessions, to: next, now: Date())) }
-        if next != sessions { sessions = next }
+        if feedReady { addToFeed(ActivityFeed.events(from: allSessions, to: next, now: Date())) }
+        if next != allSessions { allSessions = next }
+        let visible = next.filter { !hidden.isHidden($0) }
+        if visible != sessions { sessions = visible }
         let limits = store.planLimits
         if limits != planLimits { planLimits = limits }
     }

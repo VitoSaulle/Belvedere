@@ -62,6 +62,21 @@ struct PlanciaView: View {
             }
             Spacer()
             FilterPicker(selection: $filter)
+            Menu {
+                let stale = model.staleSessionIDs
+                Button("Nascondi le concluse da più di 7 giorni (\(stale.count))") { model.hide(stale) }
+                    .disabled(stale.isEmpty)
+                if !model.hiddenSessions.isEmpty {
+                    SettingsLink { Text("Sessioni nascoste (\(model.hiddenSessions.count))…") }
+                }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 30, height: 30)
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .help("Altre azioni")
         }
         .padding(.top, 8)
     }
@@ -99,6 +114,7 @@ struct PlanciaView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 290, maximum: 420), spacing: 14, alignment: .top)], spacing: 14) {
                 ForEach(visible) { session in
                     SessionCard(session: session)
+                        .contextMenu { HideButton(sessionID: session.id) }
                 }
             }
             .animation(.smooth(duration: 0.25), value: visible.map(\.id))
@@ -152,5 +168,15 @@ struct IndexingBar: View {
                 .monospacedDigit()
                 .fixedSize()
         }
+    }
+}
+
+/// Voce «Nascondi» dei menu contestuali: la sessione esce dalla vista ma i suoi file restano.
+struct HideButton: View {
+    @Environment(AppModel.self) private var model
+    let sessionID: String
+
+    var body: some View {
+        Button("Nascondi", systemImage: "eye.slash") { model.hide([sessionID]) }
     }
 }

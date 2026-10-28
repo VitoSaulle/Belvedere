@@ -65,6 +65,29 @@ struct SettingsView: View {
                 .onChange(of: appearance) { _, value in (Appearance(rawValue: value) ?? .system).apply() }
             }
 
+            Section("Sessioni nascoste (\(model.hiddenSessions.count))") {
+                if model.hiddenSessions.isEmpty {
+                    Text("Nessuna. Dal menu contestuale di una sessione scegli «Nascondi»: i file restano dove sono e la sessione ricompare se torna attiva.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(model.hiddenSessions) { session in
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(session.displayName).lineLimit(1)
+                                Text("\(Fmt.folder(session.cwd)) · \(Fmt.ago(session.lastActivity))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button("Mostra di nuovo") { model.unhide(session.id) }
+                        }
+                    }
+                }
+            }
+
             Section("Server locale") {
                 LabeledContent("Indirizzo", value: "127.0.0.1:\(Belvedere.defaultPort)")
                 if let error = model.serverError {
