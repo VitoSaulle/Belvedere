@@ -18,6 +18,11 @@ public struct TranscriptRoots: Sendable {
 public struct IndexUpdate: Sendable {
     public let changed: [SessionSnapshot]
     public let newBuckets: [UsageBucket]
+
+    public init(changed: [SessionSnapshot], newBuckets: [UsageBucket]) {
+        self.changed = changed
+        self.newBuckets = newBuckets
+    }
 }
 
 /// Indice incrementale di tutte le trascrizioni, con cache su disco.

@@ -15,6 +15,11 @@ final class AppModel {
     private(set) var buckets: [UsageBucket] = []
     let policy: PermissionPolicy
 
+    /// Navigazione condivisa tra finestra, menu bar e scorciatoie.
+    var route: Route = .plancia
+    /// Cartella su cui è filtrata la Plancia, scelta dalla sezione «Progetti».
+    var projectFilter: String?
+
     @ObservationIgnored private var store = LiveSessionStore()
     @ObservationIgnored private let roots: TranscriptRoots
     @ObservationIgnored private let index: TranscriptIndex
@@ -55,6 +60,9 @@ final class AppModel {
         watcher.start()
         self.watcher = watcher
 
+        // La cache dell'indice contiene già le sessioni note: si mostrano subito,
+        // poi refreshAll porta solo ciò che è cambiato da allora.
+        await absorb(IndexUpdate(changed: await index.sessions, newBuckets: []))
         indexingProgress = 0
         let update = await index.refreshAll { [weak self] progress in
             Task { @MainActor in self?.indexingProgress = progress }
