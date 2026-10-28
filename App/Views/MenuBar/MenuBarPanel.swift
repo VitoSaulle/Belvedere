@@ -9,6 +9,14 @@ struct MenuBarPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if ProfileMenu.isVisible(model) {
+                HStack {
+                    ProfileMenu()
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                    Spacer()
+                }
+            }
             limits
             let waiting = model.sessions.filter { $0.status == .waiting }
             if !waiting.isEmpty {
