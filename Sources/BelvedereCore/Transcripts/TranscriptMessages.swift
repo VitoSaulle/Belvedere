@@ -44,7 +44,7 @@ public enum TranscriptMessages {
 
     // MARK: - Claude
 
-    static func claudeItems(_ obj: [String: Any]) -> [TranscriptItem] {
+    public static func claudeItems(_ obj: [String: Any]) -> [TranscriptItem] {
         guard obj["isMeta"] as? Bool != true, let message = obj["message"] as? [String: Any] else { return [] }
         switch obj["type"] as? String {
         case "user":
