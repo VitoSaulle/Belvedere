@@ -58,10 +58,12 @@ final class AppModel {
     private(set) var busyFolders: [AgentKind: Set<String>]?
     /// Sessioni passate al terminale il cui processo è ancora vivo; aggiornato col tick, non a ogni ridisegno.
     private(set) var terminalOwned: Set<String> = []
+    @ObservationIgnored private var savedWindows: [String: Int] = [:]
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
     static let limitsKey = "lastClaudeLimits"
+    static let windowsKey = "knownContextWindows"
 
     init(roots: TranscriptRoots = .default,
          policy: PermissionPolicy = PermissionPolicy(storageValue: UserDefaults.standard.string(forKey: AppModel.policyKey))) {
@@ -121,6 +123,10 @@ final class AppModel {
            let saved = try? JSONDecoder().decode(PlanLimits.self, from: data) {
             store.apply(claudeLimits: saved)
             store.tick(now: Date())
+        }
+        if let windows = UserDefaults.standard.dictionary(forKey: Self.windowsKey) as? [String: Int] {
+            store.restore(knownWindows: windows)
+            savedWindows = windows
         }
         startServer()
         if !hooksInstalled && !UserDefaults.standard.bool(forKey: Self.welcomeKey) { showWelcome = true }
@@ -423,6 +429,13 @@ final class AppModel {
             if let data = try? JSONEncoder().encode(limits) { UserDefaults.standard.set(data, forKey: Self.limitsKey) }
         }
         syncHosted()
+        saveKnownWindows()
+    }
+
+    private func saveKnownWindows() {
+        guard store.knownWindows != savedWindows else { return }
+        savedWindows = store.knownWindows
+        UserDefaults.standard.set(savedWindows, forKey: Self.windowsKey)
     }
 
     private func syncHosted() {
@@ -497,6 +510,7 @@ final class AppModel {
         if let limits = payload.limits, let data = try? JSONEncoder().encode(limits) {
             UserDefaults.standard.set(data, forKey: Self.limitsKey)
         }
+        saveKnownWindows()
         publish()
     }
 

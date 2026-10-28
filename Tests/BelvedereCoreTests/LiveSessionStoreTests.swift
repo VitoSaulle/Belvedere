@@ -223,6 +223,43 @@ import Testing
         #expect(store.sessions.first?.contextTokens == 250_000)
     }
 
+    /// Il log non dice la finestra: quella vista per lo stesso modello in un'altra sessione vale anche qui,
+    /// per esempio per una sessione ripresa in Belvedere prima del suo primo turno.
+    @Test func knownModelWindowAppliesBeforeFirstTurn() throws {
+        var store = LiveSessionStore()
+        var first = logSnapshot("a", status: .done)
+        first.model = "claude-haiku-5-5"
+        var second = logSnapshot("b", status: .done)
+        second.model = "claude-haiku-5-5"
+        var other = logSnapshot("c", status: .done)
+        other.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [first, second, other], newBuckets: []))
+        var hosted = SessionSnapshot(id: "a", agent: .claude, cwd: "/p")
+        hosted.model = "claude-haiku-5-5"
+        hosted.contextWindow = 1_000_000
+        hosted.lastActivity = Date()
+        store.setHosted(["a"])
+        store.apply(hosted: hosted)
+        let byID = Dictionary(uniqueKeysWithValues: store.sessions.map { ($0.id, $0) })
+        #expect(byID["b"]?.contextWindow == 1_000_000)
+        #expect(byID["c"]?.contextWindow == 200_000)
+        #expect(store.knownWindows == ["claude-haiku-5-5": 1_000_000])
+
+        var restored = LiveSessionStore()
+        restored.restore(knownWindows: store.knownWindows)
+        restored.apply(IndexUpdate(changed: [second], newBuckets: []))
+        #expect(restored.sessions.first?.contextWindow == 1_000_000)
+    }
+
+    @Test func statusLineTeachesTheModelWindow() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .working, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","context_window":{"used_percentage":25,"context_window_size":1000000}}"#.utf8), now: Date()))
+        #expect(store.knownWindows == ["claude-opus-5-5": 1_000_000])
+    }
+
     @Test func sortsWaitingThenWorkingThenRecent() {
         var store = LiveSessionStore()
         let now = Date()

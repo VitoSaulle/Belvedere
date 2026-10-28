@@ -34,6 +34,9 @@ public struct LiveSessionStore: Sendable {
     private var hosted: [String: SessionSnapshot] = [:]
     /// Ultimi limiti letti dalla status line: l'app li salva e li ripristina all'avvio.
     public private(set) var claudeLimits: PlanLimits?
+    /// Finestra di contesto per modello Claude, vista da status line e chat ospitate: il log non la dice.
+    /// L'app la salva e la ripristina all'avvio.
+    public private(set) var knownWindows: [String: Int] = [:]
     private var now: Date = .distantPast
 
     public init() {}
@@ -95,6 +98,7 @@ public struct LiveSessionStore: Sendable {
         let at = status.limits?.observedAt ?? Date()
         advance(to: at)
         statusLines[status.sessionID] = StatusLineState(payload: status, at: at)
+        if let model = logs[status.sessionID]?.model { learnWindow(status.contextWindowSize, for: model) }
         if let limits = status.limits { claudeLimits = limits }
     }
 
@@ -108,7 +112,17 @@ public struct LiveSessionStore: Sendable {
     public mutating func apply(hosted snapshot: SessionSnapshot) {
         guard hostedIDs.contains(snapshot.id) || exitedIDs.contains(snapshot.id) else { return }
         hosted[snapshot.id] = snapshot
+        if let model = snapshot.model, !snapshot.isLocalModel { learnWindow(snapshot.contextWindow, for: model) }
         if let date = snapshot.lastActivity { advance(to: date) }
+    }
+
+    public mutating func restore(knownWindows windows: [String: Int]) {
+        knownWindows = windows
+    }
+
+    private mutating func learnWindow(_ window: Int?, for model: String) {
+        guard let window, window > 0, !ModelInfo.isLocal(claudeModel: model) else { return }
+        knownWindows[model] = window
     }
 
     public mutating func apply(claudeLimits limits: PlanLimits?) {
@@ -163,6 +177,10 @@ public struct LiveSessionStore: Sendable {
         var s: SessionSnapshot
         if let log = logs[id] {
             s = log
+            if s.agent == .claude, !s.isLocalModel, let model = s.model, let known = knownWindows[model],
+               known > (s.contextWindow ?? 0) {
+                s.contextWindow = known
+            }
         } else if let hook {
             s = SessionSnapshot(id: id, agent: .claude, cwd: hook.cwd ?? "", transcriptPath: hook.transcriptPath ?? "")
             s.lastActivity = hook.statusAt
