@@ -53,7 +53,7 @@ import Testing
 
     @Test func resumeUsesThreadResumeAndRestoresHistory() {
         var c = CodexConversation(options: LaunchOptions(folder: "/p", agent: .codex, resumeID: "t9"))
-        var state = ChatState(agent: .codex, history: [.user(id: "vecchio", text: "dal file")])
+        var state = ChatState(agent: .codex)
         _ = c.begin()
         let out = c.receive(Self.message(#"{"id":1,"result":{}}"#), state: &state, now: now).map(Self.object)
         #expect(out[1]["method"]?.stringValue == "thread/resume")
@@ -206,6 +206,95 @@ import Testing
         let started = #"{"id":\#(Int(id.numberValue!)),"result":{"thread":{"id":"t2"}}}"#
         _ = c.receive(Self.message(started), state: &state, now: now)
         #expect(state.sessionID == "t2")
+    }
+}
+
+extension CodexConversationTests {
+    /// Ripresa con la storia già letta dal file: non si perde, e nemmeno il messaggio appena scritto.
+    @Test func resumeKeepsLoadedHistoryAndPendingMessage() {
+        var c = CodexConversation(options: LaunchOptions(folder: "/p", agent: .codex, resumeID: "t9"))
+        var state = ChatState(agent: .codex, history: [.user(id: "f0", text: "dal file"), .tool(id: "c3", name: "exec_command", detail: "ls", added: nil, removed: nil)])
+        _ = c.begin()
+        state.userSent("nuovo", now: now)
+        _ = c.send("nuovo")
+        _ = c.receive(Self.message(#"{"id":1,"result":{}}"#), state: &state, now: now)
+        let out = c.receive(Self.message(#"{"id":2,"result":{"thread":{"id":"t9","turns":[{"items":[{"type":"agentMessage","id":"m1","text":"salve"}]}]}}}"#), state: &state, now: now)
+        #expect(state.items.count == 3)
+        #expect(state.items.first == .user(id: "f0", text: "dal file"))
+        #expect(state.items.contains { if case .user(_, "nuovo") = $0 { true } else { false } })
+        #expect(out.count == 1)
+    }
+
+    /// Senza storia caricata vale quella del server, con dopo il messaggio appena scritto.
+    @Test func resumeWithoutHistoryKeepsPendingMessageLast() {
+        var c = CodexConversation(options: LaunchOptions(folder: "/p", agent: .codex, resumeID: "t9"))
+        var state = ChatState(agent: .codex)
+        _ = c.begin()
+        state.userSent("nuovo", now: now)
+        _ = c.send("nuovo")
+        _ = c.receive(Self.message(#"{"id":1,"result":{}}"#), state: &state, now: now)
+        _ = c.receive(Self.message(#"{"id":2,"result":{"thread":{"id":"t9","turns":[{"items":[{"type":"agentMessage","id":"m1","text":"salve"}]}]}}}"#), state: &state, now: now)
+        #expect(state.items.first == .assistant(id: "m1", text: "salve"))
+        if case .user(_, let text)? = state.items.last { #expect(text == "nuovo") } else { Issue.record("manca il messaggio") }
+    }
+
+    /// `/clear` a turno in corso: il vecchio turno si ferma e le sue notifiche non entrano nella chat nuova.
+    @Test func clearDuringTurnInterruptsAndIgnoresOldThread() {
+        var (c, state) = ready()
+        _ = c.receive(.turnStarted(turnID: "u1"), state: &state, now: now)
+        let out = c.newThread(state: &state).map(Self.object)
+        #expect(out.map { $0["method"]?.stringValue } == ["turn/interrupt", "thread/start"])
+        _ = c.receive(line: Data(#"{"method":"item/agentMessage/delta","params":{"threadId":"t1","delta":"vecchio"}}"#.utf8), state: &state, now: now)
+        #expect(state.streaming == nil)
+        let old = c.receive(line: Data(#"{"method":"item/commandExecution/requestApproval","id":4,"params":{"threadId":"t1","command":"rm x"}}"#.utf8), state: &state, now: now).map(Self.object)
+        #expect(state.asks.isEmpty)
+        #expect(old.first?["result"]?["decision"]?.stringValue == "decline")
+    }
+
+    /// Thread non aperto: il messaggio successivo riprova ad aprirlo invece di restare «al lavoro» per sempre.
+    @Test func failedThreadStartIsRetriedOnNextMessage() {
+        var c = CodexConversation(options: LaunchOptions(folder: "/p", agent: .codex))
+        var state = ChatState(agent: .codex)
+        _ = c.begin()
+        _ = c.receive(Self.message(#"{"id":1,"result":{}}"#), state: &state, now: now)
+        _ = c.receive(Self.message(#"{"id":2,"error":{"code":-1,"message":"modello assente"}}"#), state: &state, now: now)
+        let retry = c.send("ciao").map(Self.object)
+        #expect(retry.map { $0["method"]?.stringValue } == ["thread/start"])
+        let id = Int(retry[0]["id"]!.numberValue!)
+        let out = c.receive(Self.message(#"{"id":\#(id),"result":{"thread":{"id":"t3"}}}"#), state: &state, now: now).map(Self.object)
+        #expect(out.map { $0["method"]?.stringValue } == ["turn/start"])
+    }
+
+    /// «Ferma» premuto prima che il turno abbia un id: parte appena arriva.
+    @Test func interruptBeforeTurnStartsIsSentLater() {
+        var (c, state) = ready()
+        _ = c.send("ciao")
+        #expect(c.interrupt().isEmpty)
+        let out = c.receive(.turnStarted(turnID: "u1"), state: &state, now: now).map(Self.object)
+        #expect(out.first?["method"]?.stringValue == "turn/interrupt")
+        // Da fermi «Ferma» non resta in sospeso per il turno dopo.
+        _ = c.receive(.turnCompleted(turnID: "u1", status: "interrupted", error: nil), state: &state, now: now)
+        #expect(c.interrupt().isEmpty)
+        #expect(c.receive(.turnStarted(turnID: "u2"), state: &state, now: now).isEmpty)
+    }
+
+    /// Id numerico 5 e id testuale "5" sono richieste diverse.
+    @Test func numericAndStringIDsDoNotCollide() {
+        var (c, state) = ready()
+        _ = c.receive(Self.message(#"{"method":"item/commandExecution/requestApproval","id":5,"params":{"command":"ls"}}"#), state: &state, now: now)
+        _ = c.receive(Self.message(#"{"method":"item/commandExecution/requestApproval","id":"5","params":{"command":"pwd"}}"#), state: &state, now: now)
+        #expect(state.asks.count == 2)
+    }
+
+    /// Dopo «Riavvia» la sessione non resta «chiusa» finché non parte un turno.
+    @Test func resumedThreadClearsEndedStatus() {
+        var c = CodexConversation(options: LaunchOptions(folder: "/p", agent: .codex, resumeID: "t9"))
+        var state = ChatState(agent: .codex)
+        state.processExited(code: 1, stderr: "", now: now)
+        _ = c.begin()
+        _ = c.receive(Self.message(#"{"id":1,"result":{}}"#), state: &state, now: now)
+        _ = c.receive(Self.message(#"{"id":2,"result":{"thread":{"id":"t9"}}}"#), state: &state, now: now)
+        #expect(state.status == .idle)
     }
 }
 

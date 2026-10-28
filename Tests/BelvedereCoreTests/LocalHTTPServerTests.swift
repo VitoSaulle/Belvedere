@@ -129,6 +129,41 @@ import Testing
         #expect(Date().timeIntervalSince(start) < 2)
     }
 
+    /// Un corpo troppo grande che arriva lentamente riceve comunque il 413, non una chiusura per inattività.
+    @Test func slowOversizedBodyStillGets413() async throws {
+        let server = LocalHTTPServer(port: 0, idleTimeout: 0.3) { _, _, _ in (200, Data()) }
+        try server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        defer { close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        _ = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        let total = LocalHTTPServer.maxBody + 1000
+        let head = "POST /x HTTP/1.1\r\nContent-Length: \(total)\r\n\r\n"
+        _ = head.withCString { send(fd, $0, strlen($0), 0) }
+        let chunk = [UInt8](repeating: 0x61, count: 65_536)
+        var sent = 0
+        while sent < total {
+            let n = min(chunk.count, total - sent)
+            _ = chunk.withUnsafeBytes { send(fd, $0.baseAddress, n, 0) }
+            sent += n
+            if sent < 4 * 65_536 { try await Task.sleep(for: .milliseconds(150)) }
+        }
+        var tv = timeval(tv_sec: 3, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        var buffer = [UInt8](repeating: 0, count: 64)
+        let n = recv(fd, &buffer, buffer.count, 0)
+        #expect(n > 0 && String(decoding: buffer.prefix(max(n, 0)), as: UTF8.self).contains("413"))
+    }
+
     /// Primo indirizzo IPv4 non di loopback, se esiste.
     static func lanAddress() -> String? {
         var list: UnsafeMutablePointer<ifaddrs>?

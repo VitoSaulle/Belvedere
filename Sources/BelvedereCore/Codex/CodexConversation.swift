@@ -16,6 +16,12 @@ public struct CodexConversation: Sendable {
     private var requests: [String: ServerRequest] = [:]
     /// Percorsi delle modifiche ai file, per mostrarli nella richiesta di approvazione.
     private var filePaths: [String: String] = [:]
+    /// Thread lasciati con `/clear`: le loro notifiche non entrano più nella chat.
+    private var abandoned: Set<String> = []
+    /// L'apertura del thread è fallita: il prossimo messaggio riprova.
+    private var threadFailed = false
+    /// «Ferma» premuto quando il turno non aveva ancora un id.
+    private var interruptRequested = false
 
     private enum Purpose: Sendable { case initialize, startThread, resumeThread, turn, interrupt }
 
@@ -40,7 +46,9 @@ public struct CodexConversation: Sendable {
     public mutating func send(_ text: String) -> [Data] {
         guard let threadID else {
             queued.append(text)
-            return []
+            guard threadFailed else { return [] }
+            threadFailed = false
+            return [startThread(resuming: options.resumeID)]
         }
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
@@ -57,17 +65,30 @@ public struct CodexConversation: Sendable {
     }
 
     public mutating func interrupt() -> [Data] {
-        guard let threadID, let turnID else { return [] }
+        guard let threadID, let turnID else {
+            // Solo se un turno sta per partire: da fermi non c'è niente da interrompere.
+            if !queued.isEmpty || pending.values.contains(.turn) { interruptRequested = true }
+            return []
+        }
         return [request("turn/interrupt", ["threadId": .string(threadID), "turnId": .string(turnID)], purpose: .interrupt)]
     }
 
     /// `/clear`: un thread nuovo nello stesso processo.
     public mutating func newThread(state: inout ChatState) -> [Data] {
+        var lines: [Data] = []
+        // Il turno in corso si ferma: dopo non ci sarebbe più modo di farlo da qui.
+        if let threadID, let turnID {
+            lines.append(request("turn/interrupt", ["threadId": .string(threadID), "turnId": .string(turnID)], purpose: .interrupt))
+        }
+        if let threadID { abandoned.insert(threadID) }
         threadID = nil
         turnID = nil
         requests = [:]
+        filePaths = [:]
+        queued = []
+        interruptRequested = false
         state = ChatState(agent: .codex, isLocal: options.local != nil)
-        return [startThread(resuming: nil)]
+        return lines + [startThread(resuming: nil)]
     }
 
     public mutating func answer(_ askID: String, allow: Bool, always: Bool) -> [Data] {
@@ -105,6 +126,19 @@ public struct CodexConversation: Sendable {
 
     // MARK: - Da Codex
 
+    /// Una riga così come arriva: quelle dei thread lasciati con `/clear` restano fuori dalla chat,
+    /// e le loro richieste si rifiutano perché il turno non resti fermo.
+    public mutating func receive(line: Data, state: inout ChatState, now: Date) -> [Data] {
+        let message = CodexMessage.decode(line)
+        guard let thread = CodexMessage.thread(of: line), abandoned.contains(thread) else {
+            return receive(message, state: &state, now: now)
+        }
+        guard case .request(let id, let method, _) = message else { return [] }
+        if method.hasSuffix("/requestApproval") { return [reply(id, .object(["decision": .string("decline")]))] }
+        return [Self.line(["jsonrpc": .string("2.0"), "id": id,
+                           "error": .object(["code": .number(-32601), "message": .string("Thread chiuso")])])]
+    }
+
     public mutating func receive(_ message: CodexMessage, state: inout ChatState, now: Date) -> [Data] {
         switch message {
         case .response(let id, let result):
@@ -115,6 +149,9 @@ public struct CodexConversation: Sendable {
             case .startThread, .resumeThread, .initialize:
                 state.lastError = "Codex non ha aperto la sessione: \(text)"
                 state.status = .ended
+                state.streaming = nil
+                threadFailed = purpose != .initialize
+                queued = []
             case .turn:
                 state.lastError = text
                 state.status = state.asks.isEmpty ? .done : .waiting
@@ -126,10 +163,17 @@ public struct CodexConversation: Sendable {
             return serverRequest(id, method: method, params: params, state: &state, now: now)
         case .turnStarted(let id):
             turnID = id
+            // Il turno chiesto è partito: «Ferma» da qui in poi usa il suo id.
+            for (key, purpose) in pending where purpose == .turn { pending[key] = nil }
             if state.status != .waiting { state.status = .working }
             state.lastActivity = now
+            if interruptRequested {
+                interruptRequested = false
+                return interrupt()
+            }
         case .turnCompleted(_, let status, let error):
             turnID = nil
+            interruptRequested = false
             state.streaming = nil
             state.lastActivity = now
             switch status {
@@ -188,9 +232,16 @@ public struct CodexConversation: Sendable {
             state.sessionID = id
             state.cwd = result["cwd"]?.stringValue ?? state.cwd ?? options.folder
             state.model = result["model"]?.stringValue ?? state.model
+            if state.status == .ended { state.status = .idle }
             if purpose == .resumeThread {
-                let history = CodexItems.history(thread)
-                if !history.isEmpty { state.items = history }
+                // La storia letta dal file è più completa (Codex non rimanda tutti gli item):
+                // quella del server serve solo se non c'è altro. I messaggi appena scritti restano in fondo.
+                let pending = state.items.filter { $0.id.hasPrefix("local-") }
+                let loaded = state.items.filter { !$0.id.hasPrefix("local-") }
+                if loaded.isEmpty {
+                    let history = CodexItems.history(thread)
+                    if !history.isEmpty { state.items = history + pending }
+                }
             }
             let waiting = queued
             queued = []
@@ -285,8 +336,8 @@ public struct CodexConversation: Sendable {
     }
 
     private static func key(_ id: JSONValue) -> String {
-        if let n = id.numberValue { return String(Int(n)) }
-        return id.stringValue ?? "?"
+        if let n = id.numberValue { return "n\(Int(n))" }
+        return "s" + (id.stringValue ?? "?")
     }
 
     private static func line(_ object: [String: JSONValue]) -> Data {

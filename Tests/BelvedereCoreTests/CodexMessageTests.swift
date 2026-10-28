@@ -82,4 +82,9 @@ import Testing
         #expect(items.first == .user(id: "01a1825c-b41b-7ef0-9869-8dd1bdb416a2", text: "Esegui con la shell il comando: touch uno.txt"))
         #expect(items.contains { if case .tool(_, "exec_command", "touch uno.txt", _, _) = $0 { true } else { false } })
     }
+
+    @Test func readsThreadOfNotificationsAndRequests() {
+        #expect(CodexMessage.thread(of: Data(#"{"method":"item/agentMessage/delta","params":{"threadId":"t1","delta":"x"}}"#.utf8)) == "t1")
+        #expect(CodexMessage.thread(of: Data(#"{"method":"turn/completed","params":{"turn":{"id":"u"}}}"#.utf8)) == nil)
+    }
 }

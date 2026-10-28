@@ -97,7 +97,7 @@ final class HostedSession: Identifiable {
             state.apply(StreamMessage.decode(data), now: Date())
             return
         }
-        let replies = conversation.receive(CodexMessage.decode(data), state: &state, now: Date())
+        let replies = conversation.receive(line: data, state: &state, now: Date())
         codex = conversation
         replies.forEach(write)
     }

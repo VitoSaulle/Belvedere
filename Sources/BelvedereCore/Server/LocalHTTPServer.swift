@@ -96,6 +96,8 @@ public final class LocalHTTPServer: Sendable {
             case .incomplete, .malformed:
                 self.respond(connection, status: 400, body: Data())
             case .tooLarge(let total):
+                // Da qui il client sta mandando dati: il limite d'inattività non vale più.
+                received.done.withLock { $0 = true }
                 // Chiudere con dati non letti fa partire un RST e il client perde il 413:
                 // si scarta il resto del corpo (entro un limite) e poi si risponde.
                 self.discard(connection, remaining: min(total, Self.drainLimit) - buffer.count)

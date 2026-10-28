@@ -35,6 +35,13 @@ public enum CodexMessage: Equatable, Sendable {
         }
     }
 
+    /// Il thread a cui appartiene una notifica o una richiesta del server, se lo dichiara.
+    public static func thread(of line: Data) -> String? {
+        guard let raw = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let params = raw["params"] as? [String: Any] else { return nil }
+        return params["threadId"] as? String
+    }
+
     private static func notification(_ method: String, _ p: JSONValue) -> CodexMessage {
         switch method {
         case "turn/started":

@@ -398,7 +398,8 @@ final class AppModel {
             // Dopo /clear la chat resta questa, in attesa del nuovo id.
             route = .session(Self.provisionalPrefix + host.id.uuidString)
         }
-        if let limits = host.state.limits, limits != store.claudeLimits {
+        // I limiti di Codex arrivano già dai file di sessione: qui solo quelli del piano Claude.
+        if host.agent == .claude, let limits = host.state.limits, limits != store.claudeLimits {
             store.apply(claudeLimits: limits)
             if let data = try? JSONEncoder().encode(limits) { UserDefaults.standard.set(data, forKey: Self.limitsKey) }
         }

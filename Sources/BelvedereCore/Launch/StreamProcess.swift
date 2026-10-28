@@ -31,7 +31,17 @@ public final class StreamProcess: @unchecked Sendable {
     public func start() throws -> AsyncStream<Event> {
         // Scrivere su un processo già uscito non deve chiudere Belvedere.
         signal(SIGPIPE, SIG_IGN)
-        try process.run()
+        // Un solo osservatore dell'uscita, su cui possono aspettare più thread
+        // (`waitUntilExit` da due thread insieme può non tornare).
+        let exited = DispatchGroup()
+        exited.enter()
+        process.terminationHandler = { _ in exited.leave() }
+        do {
+            try process.run()
+        } catch {
+            exited.leave()
+            throw error
+        }
         let (stream, continuation) = AsyncStream<Event>.makeStream()
         let errors = stderr.fileHandleForReading
         let tail = stderrTail
@@ -59,7 +69,7 @@ public final class StreamProcess: @unchecked Sendable {
         // Un nipote (un server MCP, il binario sotto il wrapper di Codex) può tenere aperto stdout
         // dopo l'uscita: si aspetta l'EOF al massimo un attimo, poi l'uscita si segnala comunque.
         DispatchQueue.global(qos: .utility).async {
-            process.waitUntilExit()
+            exited.wait()
             if readerDone.wait(timeout: .now() + StreamProcess.eofGrace) == .timedOut { report() }
         }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -81,7 +91,7 @@ public final class StreamProcess: @unchecked Sendable {
             }
             if !buffer.isEmpty { continuation.yield(.line(buffer)) }
             readerDone.signal()
-            process.waitUntilExit()
+            exited.wait()
             report()
         }
         return stream
