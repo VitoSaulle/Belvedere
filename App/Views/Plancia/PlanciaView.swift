@@ -91,18 +91,26 @@ struct PlanciaView: View {
         .help("Nuova sessione (⌘N)")
         Menu {
             let stale = model.staleSessionIDs
-            Button("Nascondi le concluse da più di 7 giorni (\(stale.count))") { model.hide(stale) }
+            Button(stale.isEmpty ? "Nessuna sessione conclusa da più di 7 giorni"
+                                 : "Nascondi le concluse da più di 7 giorni (\(stale.count))",
+                   systemImage: "eye.slash") { model.hide(stale) }
                 .disabled(stale.isEmpty)
-            if !model.hiddenSessions.isEmpty {
-                SettingsLink { Text("Sessioni nascoste (\(model.hiddenSessions.count))…") }
+            SettingsLink {
+                Label("Sessioni nascoste (\(model.hiddenSessions.count))…", systemImage: "archivebox")
             }
+            Divider()
+            Button("Statistiche", systemImage: "chart.bar") { model.route = .stats }
+            Button("Plugin di Claude Code…", systemImage: "puzzlepiece.extension") { model.showPlugins = true }
+            SettingsLink { Label("Impostazioni…", systemImage: "gearshape") }
         } label: {
-            Image(systemName: "ellipsis").frame(width: 30, height: 30)
+            Image(systemName: "ellipsis")
+                .frame(width: 18, height: 18)
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .circle)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .fixedSize()
         .help("Altre azioni")
     }
 
