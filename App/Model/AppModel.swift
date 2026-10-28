@@ -50,6 +50,8 @@ final class AppModel {
     }()
     /// Foglio «Nuova sessione», con la cartella proposta.
     var showNewSession = false
+    var showPlugins = false
+    let plugins = PluginManager()
     var newSessionFolder: String?
     /// Sessioni passate al terminale da questa esecuzione: osservate, così la vista si aggiorna subito.
     private(set) var handedOff: Set<String> = []
@@ -146,6 +148,7 @@ final class AppModel {
         // `open Belvedere.app --args -BelvedereOpenSession <id>` apre direttamente una sessione.
         if let id = UserDefaults.standard.string(forKey: "BelvedereOpenSession") { route = .session(id) }
         if UserDefaults.standard.bool(forKey: "BelvedereOpenStats") { route = .stats }
+        if UserDefaults.standard.bool(forKey: "BelvedereShowPlugins") { showPlugins = true }
         if UserDefaults.standard.bool(forKey: "BelvedereNewSession") {
             newSessionFolder = UserDefaults.standard.string(forKey: "BelvedereNewSessionFolder")
             showNewSession = true

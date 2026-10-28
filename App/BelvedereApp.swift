@@ -23,6 +23,7 @@ struct BelvedereApp: App {
                     .keyboardShortcut("0")
                 Button("Statistiche") { delegate.model.route = .stats }
                     .keyboardShortcut("s", modifiers: [.command, .option])
+                Button("Plugin di Claude Code…") { delegate.model.showPlugins = true }
             }
         }
         Settings {

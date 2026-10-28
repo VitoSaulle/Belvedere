@@ -169,7 +169,7 @@ final class HostedSession: Identifiable {
             }
         case .clear:
             Task { await clear() }
-        case .terminalOnly:
+        case .terminalOnly, .plugins:
             break
         }
         changed()

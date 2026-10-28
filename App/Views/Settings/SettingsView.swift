@@ -32,6 +32,7 @@ struct SettingsView: View {
                             .buttonStyle(.borderedProminent)
                     }
                 }
+                Button("Gestisci i plugin…") { model.showPlugins = true }
                 if let backup = model.lastBackup {
                     LabeledContent("Ultimo backup") {
                         Button((backup as NSString).lastPathComponent) {

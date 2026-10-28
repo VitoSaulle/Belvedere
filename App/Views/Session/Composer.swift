@@ -99,9 +99,17 @@ struct Composer: View {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return }
         terminalOnly = nil
-        if case .terminalOnly(let name) = host.send(message) {
+        switch host.send(message) {
+        case .terminalOnly(let name):
             terminalOnly = name
             return
+        case .plugins where host.agent == .claude:
+            model.showPlugins = true
+        case .plugins:
+            terminalOnly = "plugin"
+            return
+        default:
+            break
         }
         text = ""
     }

@@ -14,8 +14,8 @@ import Testing
         #expect(SlashRoute.route("/doctor", terminalCommands: ["doctor"]) == .terminalOnly("doctor"))
     }
 
-    @Test func pluginIsTerminalOnly() {
-        for name in ["plugin", "login", "logout", "resume", "exit", "quit"] {
+    @Test func accountCommandsAreTerminalOnly() {
+        for name in ["login", "logout", "resume", "exit", "quit"] {
             #expect(SlashRoute.route("/\(name) x", terminalCommands: []) == .terminalOnly(name))
         }
     }
@@ -48,5 +48,11 @@ import Testing
         }
         #expect(Completions.files("app", root: root) == ["src/App.swift"])
         #expect(Completions.files("", root: root, limit: 1).count == 1)
+    }
+
+    /// `/plugin` apre il pannello nativo, anche con argomenti (`/plugin install x`).
+    @Test func pluginOpensThePanel() {
+        #expect(SlashRoute.route("/plugin", terminalCommands: []) == .plugins)
+        #expect(SlashRoute.route("/plugins install x", terminalCommands: ["plugin"]) == .plugins)
     }
 }

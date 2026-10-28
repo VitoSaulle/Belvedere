@@ -30,6 +30,9 @@ struct MainWindow: View {
         .sheet(isPresented: $model.showNewSession) {
             NewSessionSheet()
         }
+        .sheet(isPresented: $model.showPlugins) {
+            PluginsSheet()
+        }
     }
 
     @ViewBuilder private var detail: some View {
