@@ -2,6 +2,7 @@ import Foundation
 
 /// Conversazione di una sessione lanciata da Belvedere, ricostruita dai messaggi stream-json.
 public struct ChatState: Sendable {
+    public var agent: AgentKind
     public var items: [TranscriptItem]
     /// Testo dell'assistente ancora in arrivo nel turno in corso.
     public var streaming: String?
@@ -22,13 +23,15 @@ public struct ChatState: Sendable {
     public var lastError: String?
     public var lastActivity: Date?
 
-    public init(history: [TranscriptItem] = []) {
+    public init(agent: AgentKind = .claude, history: [TranscriptItem] = []) {
+        self.agent = agent
         items = history
     }
 
     /// Una sessione ripresa con `--resume`: la CLI manda `init` solo al primo turno,
     /// ma id e cartella sono già noti.
-    public init(history: [TranscriptItem] = [], resuming sessionID: String, folder: String) {
+    public init(agent: AgentKind = .claude, history: [TranscriptItem] = [], resuming sessionID: String, folder: String) {
+        self.agent = agent
         items = history
         self.sessionID = sessionID
         cwd = folder
@@ -131,7 +134,7 @@ public struct ChatState: Sendable {
     /// La sessione come la vedono Plancia, menu bar e notch; `nil` finché Claude non ha dato l'id.
     public func snapshot(launchedAt: Date?) -> SessionSnapshot? {
         guard let sessionID else { return nil }
-        var s = SessionSnapshot(id: sessionID, agent: .claude, cwd: cwd ?? "")
+        var s = SessionSnapshot(id: sessionID, agent: agent, cwd: cwd ?? "")
         s.status = status
         s.model = model
         s.startedAt = launchedAt
