@@ -26,11 +26,11 @@ struct SidebarView: View {
             .tag(Route.plancia)
 
             Section {
-                ForEach(model.sessions.prefix(12)) { session in
+                ForEach(model.boardSessions.prefix(12)) { session in
                     SessionRow(session: session).tag(Route.session(session.id))
                         .contextMenu { SessionMenuItems(sessionID: session.id) }
                 }
-                if model.sessions.isEmpty {
+                if model.boardSessions.isEmpty {
                     Text("Nessuna sessione").foregroundStyle(.secondary)
                 }
             } header: {
@@ -80,7 +80,7 @@ struct SidebarView: View {
 
     /// Cartelle distinte delle sessioni attive o recenti, dalla più usata.
     private var projects: [(path: String, count: Int)] {
-        let counts = Dictionary(grouping: model.sessions.filter { !$0.cwd.isEmpty }, by: \.cwd).mapValues(\.count)
+        let counts = Dictionary(grouping: model.boardSessions.filter { !$0.cwd.isEmpty }, by: \.cwd).mapValues(\.count)
         return counts.map { (path: $0.key, count: $0.value) }
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0.path < $1.path }
             .prefix(8).map { $0 }

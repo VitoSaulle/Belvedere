@@ -26,6 +26,8 @@ struct SessionCard: View {
                 PendingBox(session: session, pending: pending)
             }
         }
+        // Le sessioni degli altri profili restano visibili ma in secondo piano, tranne chi aspetta una risposta.
+        .opacity(dimmed ? 0.55 : 1)
         .padding(14)
         .background(cardFill, in: .rect(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(border, lineWidth: session.status == .waiting ? 1.5 : 1))
@@ -43,11 +45,16 @@ struct SessionCard: View {
             if session.origin != nil {
                 Button("Vai a \(session.origin!.appName)") { model.activateOrigin(of: session.id) }
             }
+            ContinueMenu(session: session)
             Button("Mostra la cartella nel Finder") {
                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.cwd)
             }
             .disabled(session.cwd.isEmpty)
         }
+    }
+
+    private var dimmed: Bool {
+        session.status != .waiting && model.profiles.hasChoice(session.agent) && !model.isActiveProfile(session)
     }
 
     private var cardFill: Color {
@@ -74,6 +81,9 @@ struct SessionCard: View {
                     }
                     Tag(text: session.isLocalModel ? "Locale" : "Cloud",
                         tint: session.isLocalModel ? Theme.local : nil)
+                    if model.profiles.hasChoice(session.agent) {
+                        Tag(text: model.profile(of: session).name)
+                    }
                 }
             }
             Spacer(minLength: 6)

@@ -4,6 +4,11 @@ import SwiftUI
 struct PlanciaInspector: View {
     @Environment(AppModel.self) private var model
 
+    /// «Limiti di Claude · Lavoro 2» quando la CLI ha più profili.
+    private func limitsTitle(_ base: String, _ agent: AgentKind) -> String {
+        model.profiles.hasChoice(agent) ? "\(base) · \(model.profiles.active(agent).name)" : base
+    }
+
     var body: some View {
         let today = model.stats(range: .today, project: nil)
         let recent = model.stats(range: .days14, project: nil)
@@ -23,7 +28,7 @@ struct PlanciaInspector: View {
                     Text("Ultimi 14 giorni").font(.system(size: 10.5)).foregroundStyle(.tertiary)
                 }
 
-                Panel(title: model.codexLimits == nil ? "Limiti del piano" : "Limiti di Claude") {
+                Panel(title: limitsTitle(model.codexLimits == nil ? "Limiti del piano" : "Limiti di Claude", .claude)) {
                     LimitRow(title: "Finestra 5 h", window: model.planLimits?.fiveHour, color: Theme.accent)
                     LimitRow(title: "Settimana", window: model.planLimits?.weekly, color: .primary)
                     if model.planLimits == nil {
@@ -35,7 +40,7 @@ struct PlanciaInspector: View {
                 }
 
                 if let codex = model.codexLimits {
-                    Panel(title: "Limiti di Codex") {
+                    Panel(title: limitsTitle("Limiti di Codex", .codex)) {
                         LimitRow(title: "Finestra 5 h", window: codex.fiveHour, color: Theme.codex)
                         LimitRow(title: "Settimana", window: codex.weekly, color: .primary)
                     }

@@ -426,7 +426,31 @@ final class AppModel {
         if let data = try? JSONEncoder().encode(byProfile) { UserDefaults.standard.set(data, forKey: Self.limitsByProfileKey) }
     }
 
+    /// Sessioni della Plancia e della sidebar: con «Solo profilo attivo» quelle degli altri profili escono.
+    /// Menu bar e notch usano `sessions`: le richieste arrivano da tutti i profili.
+    var boardSessions: [SessionSnapshot] {
+        guard showOnlyActiveProfile, AgentKind.allCases.contains(where: profiles.hasChoice) else { return sessions }
+        return sessions.filter(isActiveProfile)
+    }
+
     // MARK: - Continuare in un altro profilo
+
+    /// Gli altri profili della stessa CLI, con la cartella sul disco.
+    func continueTargets(_ s: SessionSnapshot) -> [Profile] {
+        let current = profile(of: s).id
+        return profiles.profiles(s.agent).filter { $0.id != current && !profileFolderMissing($0) }
+    }
+
+    /// Il profilo con più margine nella finestra di 5 ore; uno senza limiti noti vale come libero.
+    func bestTarget(_ s: SessionSnapshot) -> Profile? {
+        continueTargets(s).min { (limits(for: $0.id)?.fiveHour?.usedPercent ?? 0) < (limits(for: $1.id)?.fiveHour?.usedPercent ?? 0) }
+    }
+
+    /// La sessione si è fermata per il limite del piano: errore della chat o finestra di 5 ore piena.
+    func hitPlanLimit(_ s: SessionSnapshot) -> Bool {
+        if let error = host(for: s.id)?.state.lastError, error.localizedCaseInsensitiveContains("limit") { return true }
+        return (limits(for: profile(of: s).id)?.fiveHour?.usedPercent ?? 0) >= 100
+    }
 
     /// Una conversazione ferma, non aperta altrove, con un file da spostare.
     func canContinueElsewhere(_ s: SessionSnapshot) -> Bool {

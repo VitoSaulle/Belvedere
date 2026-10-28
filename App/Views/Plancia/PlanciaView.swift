@@ -50,7 +50,7 @@ struct PlanciaView: View {
     }
 
     private var visible: [SessionSnapshot] {
-        model.sessions.filter { s in
+        model.boardSessions.filter { s in
             filter.matches(s) && (model.projectFilter == nil || s.cwd == model.projectFilter)
         }
     }
@@ -82,6 +82,17 @@ struct PlanciaView: View {
 
     @ViewBuilder private var controls: some View {
         FilterPicker(selection: $filter)
+        if ProfileMenu.isVisible(model) {
+            @Bindable var model = model
+            Toggle(isOn: $model.showOnlyActiveProfile) {
+                Label("Solo profilo attivo", systemImage: "person.crop.circle")
+                    .font(.system(size: 12.5, weight: .medium))
+                    .fixedSize()
+            }
+            .toggleStyle(.button)
+            .buttonBorderShape(.capsule)
+            .help("Mostra solo le sessioni dei profili attivi")
+        }
         Button { model.showNewSession = true } label: {
             Label("Nuova sessione", systemImage: "plus")
                 .font(.system(size: 12.5, weight: .semibold))
@@ -120,7 +131,7 @@ struct PlanciaView: View {
     }
 
     private var summary: String {
-        var parts = ["\(model.sessions.count) sessioni"]
+        var parts = ["\(model.boardSessions.count) sessioni"]
         parts.append("\(model.waitingCount) \(model.waitingCount == 1 ? "aspetta" : "aspettano") te")
         parts.append("\(model.workingCount) al lavoro")
         if let project = model.projectFilter { parts.append("in \(Fmt.folder(project))") }
@@ -128,7 +139,7 @@ struct PlanciaView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if model.sessions.isEmpty && model.indexingProgress == nil {
+        if model.boardSessions.isEmpty && model.indexingProgress == nil {
             ContentUnavailableView {
                 Label("Nessuna sessione", systemImage: "binoculars")
             } description: {
@@ -216,8 +227,28 @@ struct SessionMenuItems: View {
     let sessionID: String
 
     var body: some View {
+        if let session = model.session(sessionID) { ContinueMenu(session: session) }
         Button("Nascondi", systemImage: "eye.slash") { model.hide([sessionID]) }
         DeleteButton(sessionIDs: [sessionID])
+    }
+}
+
+/// «Continua con…»: la conversazione passa a un altro profilo della stessa CLI.
+struct ContinueMenu: View {
+    @Environment(AppModel.self) private var model
+    let session: SessionSnapshot
+
+    var body: some View {
+        if model.profiles.hasChoice(session.agent) {
+            Menu("Continua con…", systemImage: "arrow.right.arrow.left") {
+                ForEach(model.continueTargets(session)) { profile in
+                    Button(ProfileMenu.label(profile, model: model)) {
+                        Task { await model.continueIn(session.id, profile: profile.id) }
+                    }
+                }
+            }
+            .disabled(!model.canContinueElsewhere(session) || model.continueTargets(session).isEmpty)
+        }
     }
 }
 
