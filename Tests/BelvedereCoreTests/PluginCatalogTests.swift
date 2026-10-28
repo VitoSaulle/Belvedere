@@ -6,7 +6,7 @@ import Testing
     private let listing = #"""
     {"installed":[
       {"id":"superpowers@claude-plugins-official","version":"7.0.0","scope":"user","enabled":true,"installPath":"/x","projectEnabled":false},
-      {"id":"superpowers@claude-plugins-official","version":"7.0.0","scope":"project","enabled":false,"projectPath":"/Users/u/work/ASMB","projectEnabled":false}
+      {"id":"superpowers@claude-plugins-official","version":"7.0.0","scope":"project","enabled":false,"projectPath":"/Users/u/lavoro/atlante","projectEnabled":false}
     ],"available":[
       {"pluginId":"frontend-design@claude-plugins-official","name":"frontend-design","description":"Interfacce curate","marketplaceName":"claude-plugins-official","installCount":120},
       {"pluginId":"superpowers@claude-plugins-official","name":"superpowers","description":"Skill","marketplaceName":"claude-plugins-official","installCount":9000},
@@ -18,7 +18,7 @@ import Testing
         let catalog = try PluginCatalog.decode(Data(listing.utf8))
         #expect(catalog.installed.count == 2)
         #expect(catalog.installed[1].scope == "project")
-        #expect(catalog.installed[1].projectPath == "/Users/u/work/ASMB")
+        #expect(catalog.installed[1].projectPath == "/Users/u/lavoro/atlante")
         #expect(catalog.installed[0].name == "superpowers")
         #expect(catalog.installed[0].marketplace == "claude-plugins-official")
         #expect(catalog.installed[0].id != catalog.installed[1].id)

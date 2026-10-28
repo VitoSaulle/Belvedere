@@ -78,7 +78,7 @@ final class NotchController {
         let now = Date()
         switch name {
         case "resting": return .resting(active: 3)
-        case "working": return .working(sessionID: "demo", project: "SequorGP", since: now.addingTimeInterval(-42))
+        case "working": return .working(sessionID: "demo", project: "atlante", since: now.addingTimeInterval(-42))
         case "needsYou":
             return .needsYou(sessionID: "demo", request: PendingRequest(id: "r", kind: .permission, toolName: "Bash",
                                                                         summary: "xcodebuild test -scheme Tercio", receivedAt: now))
