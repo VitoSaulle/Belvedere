@@ -88,7 +88,9 @@ public struct ChatState: Sendable {
                 if status != .idle { status = .idle }
             } else {
                 status = asks.isEmpty ? .done : .waiting
-                if result.isError { lastError = "Il turno si è chiuso con un errore (\(result.subtype))." }
+                if result.isError {
+                    lastError = result.message?.nilIfEmpty ?? "Il turno si è chiuso con un errore (\(result.subtype))."
+                }
             }
         case .other:
             break
@@ -99,6 +101,15 @@ public struct ChatState: Sendable {
         items.append(.user(id: "local-\(UUID().uuidString)", text: text))
         status = asks.isEmpty ? .working : .waiting
         lastError = nil
+        lastActivity = now
+    }
+
+    /// Il messaggio non è arrivato a Claude (processo assente o chiuso): niente «al lavoro».
+    public mutating func sendFailed(_ error: String, now: Date) {
+        streaming = nil
+        asks = []
+        status = .ended
+        lastError = error
         lastActivity = now
     }
 

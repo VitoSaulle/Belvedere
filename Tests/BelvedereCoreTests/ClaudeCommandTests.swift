@@ -130,6 +130,32 @@ import Testing
         #expect(!TerminalHandoff.isRunning(pidFile: file))
     }
 
+    @Test func resumingLeavesTheWorktreeWhereItIs() {
+        let o = LaunchOptions(folder: "/repo", permission: .acceptEdits, worktree: true)
+        let r = o.resuming("abc", cwd: "/repo/.claude/worktrees/x")
+        #expect(r.folder == "/repo/.claude/worktrees/x")
+        #expect(r.worktree == false)
+        #expect(r.resumeID == "abc")
+        #expect(r.permission == .acceptEdits)
+    }
+
+    @Test func resumingALocalSessionStaysLocal() {
+        var s = SessionSnapshot(id: "abc", agent: .claude, cwd: "/p")
+        s.model = "qwen3-coder"
+        s.isLocalModel = true
+        s.contextWindow = 32768
+        let o = LaunchOptions.resuming(s)
+        #expect(o.local == LocalModelChoice(id: "qwen3-coder", contextLength: 32768))
+        #expect(o.resumeID == "abc")
+        #expect(o.folder == "/p")
+    }
+
+    @Test func handoffKeepsTheLocalModel() {
+        let script = TerminalHandoff.script(cwd: "/p", sessionID: "abc", binary: "/b/claude", pidFile: "/s/abc.pid",
+                                            environment: ["ANTHROPIC_BASE_URL": "http://localhost:1234"])
+        #expect(script.contains("export ANTHROPIC_BASE_URL='http://localhost:1234'"))
+    }
+
     @Test func presetsStoreSafeOptions() {
         let preset = LaunchPreset(name: "Svelto", options: LaunchOptions(folder: "/p", permission: .skip, resumeID: "x"))
         #expect(preset.options.permission == .ask)

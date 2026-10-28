@@ -122,6 +122,21 @@ import Testing
         #expect(state.asks.isEmpty)
     }
 
+    @Test func turnErrorShowsTheCLIText() {
+        var state = ChatState()
+        let line = Data(#"{"type":"result","subtype":"success","is_error":true,"result":"Invalid API key · Please run /login"}"#.utf8)
+        state.apply(StreamMessage.decode(line), now: now)
+        #expect(state.lastError == "Invalid API key · Please run /login")
+    }
+
+    @Test func failedSendDoesNotLookWorking() {
+        var state = ChatState()
+        state.userSent("ciao", now: now)
+        state.sendFailed("Claude Code non trovato.", now: now)
+        #expect(state.status == .ended)
+        #expect(state.lastError == "Claude Code non trovato.")
+    }
+
     @Test func cleanExitHasNoError() {
         var state = ChatState()
         state.processExited(code: 0, stderr: "", now: now)

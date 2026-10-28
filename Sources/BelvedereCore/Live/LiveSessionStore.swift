@@ -29,6 +29,8 @@ public struct LiveSessionStore: Sendable {
     private var codexLimits: PlanLimits?
     /// Sessioni lanciate da Belvedere e ancora vive: la loro chat è la fonte di stato e richieste.
     private var hostedIDs: Set<String> = []
+    /// Sessioni di Belvedere il cui processo è uscito: restano ferme finché un hook non dice altro.
+    private var exitedIDs: Set<String> = []
     private var hosted: [String: SessionSnapshot] = [:]
     /// Ultimi limiti letti dalla status line: l'app li salva e li ripristina all'avvio.
     public private(set) var claudeLimits: PlanLimits?
@@ -96,14 +98,15 @@ public struct LiveSessionStore: Sendable {
         if let limits = status.limits { claudeLimits = limits }
     }
 
-    public mutating func setHosted(_ ids: Set<String>) {
+    public mutating func setHosted(_ ids: Set<String>, exited: Set<String> = []) {
         hostedIDs = ids
-        hosted = hosted.filter { ids.contains($0.key) }
+        exitedIDs = exited
+        hosted = hosted.filter { ids.contains($0.key) || exited.contains($0.key) }
     }
 
     /// Stato della chat di una sessione lanciata da Belvedere: prevale su log e hook.
     public mutating func apply(hosted snapshot: SessionSnapshot) {
-        guard hostedIDs.contains(snapshot.id) else { return }
+        guard hostedIDs.contains(snapshot.id) || exitedIDs.contains(snapshot.id) else { return }
         hosted[snapshot.id] = snapshot
         if let date = snapshot.lastActivity { advance(to: date) }
     }
@@ -199,7 +202,13 @@ public struct LiveSessionStore: Sendable {
         let quiet = now.timeIntervalSince(s.lastActivity ?? .distantPast)
         if s.status == .working, quiet > Self.workingTimeout { s.status = .idle }
         if s.status == .done, quiet > Self.doneTimeout { s.status = .idle }
-        if let live = hosted[id] {
+        // Dopo l'uscita del processo vale lo stato finale della chat, ma un hook più recente
+        // (la sessione ripresa altrove) torna a comandare.
+        let overlay = hosted[id].flatMap { live -> SessionSnapshot? in
+            guard !hostedIDs.contains(id), let hook, hook.statusAt > (live.lastActivity ?? .distantPast) else { return live }
+            return nil
+        }
+        if let live = overlay {
             // La chat sa sempre cosa sta succedendo: niente scadenze dedotte dal silenzio.
             s.status = live.status
             s.pending = live.pending

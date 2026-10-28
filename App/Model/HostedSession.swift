@@ -13,6 +13,11 @@ final class HostedSession: Identifiable {
 
     /// Chiamato dopo ogni cambiamento di stato: AppModel aggiorna Plancia, menu bar e notch.
     @ObservationIgnored var onChange: (() -> Void)?
+    /// Prima di riprendere una sessione: un motivo per non farlo (es. è aperta in un terminale), o `nil`.
+    @ObservationIgnored var resumeBlocker: (() -> String?)?
+    /// Id della conversazione lasciata con `/clear`, per spostare la navigazione su quella nuova.
+    private(set) var clearedFrom: String?
+    private var isStopping = false
     @ObservationIgnored private var process: StreamProcess?
     @ObservationIgnored private var reader: Task<Void, Never>?
 
@@ -29,8 +34,15 @@ final class HostedSession: Identifiable {
         }
     }
 
+    var pid: Int32? { process?.pid }
+
     func start() {
-        guard !isRunning else { return }
+        guard !isRunning, !isStopping else { return }
+        if options.resumeID != nil, let reason = resumeBlocker?() {
+            state.lastError = reason
+            changed()
+            return
+        }
         guard let binary else {
             state.lastError = "Claude Code non trovato: installa la CLI o aggiungila al PATH."
             changed()
@@ -73,6 +85,11 @@ final class HostedSession: Identifiable {
         case .send(let message):
             if !isRunning { resumeIfPossible() }
             state.userSent(message, now: Date())
+            // Senza processo il messaggio non parte: niente «al lavoro» e resta il motivo.
+            guard isRunning else {
+                state.sendFailed(state.lastError ?? "Claude Code non è avviato.", now: Date())
+                break
+            }
             write(StreamInput.user(message))
         case .setModel(let model):
             state.userSent(text, now: Date())
@@ -106,11 +123,16 @@ final class HostedSession: Identifiable {
     }
 
     func stop() async {
-        guard let process else { return }
+        guard let process, !isStopping else { return }
+        // Mentre si ferma nessun invio o «Riavvia» può partire un secondo processo.
+        isStopping = true
         await process.stop()
         await reader?.value
-        self.process = nil
-        isRunning = false
+        if self.process === process {
+            self.process = nil
+            isRunning = false
+        }
+        isStopping = false
     }
 
     /// Riavvia il processo dopo un errore, riprendendo la stessa conversazione.
@@ -120,12 +142,15 @@ final class HostedSession: Identifiable {
     }
 
     private func resumeIfPossible() {
-        if let id = state.sessionID { options.resumeID = id }
+        // Nella cartella dove la sessione lavora davvero: un worktree già creato non si ricrea.
+        if let id = state.sessionID { options = options.resuming(id, cwd: state.cwd) }
         start()
     }
 
     private func clear() async {
         await stop()
+        clearedFrom = state.sessionID
+        options = options.resuming("", cwd: state.cwd)
         options.resumeID = nil
         state = ChatState()
         start()
@@ -133,9 +158,10 @@ final class HostedSession: Identifiable {
 
     private func write(_ data: Data) {
         do {
-            try process?.send(data)
+            guard let process else { throw CocoaError(.fileWriteUnknown) }
+            try process.send(data)
         } catch {
-            state.lastError = "Claude Code non risponde: la sessione è ferma."
+            state.sendFailed("Claude Code non risponde: la sessione è ferma.", now: Date())
         }
     }
 

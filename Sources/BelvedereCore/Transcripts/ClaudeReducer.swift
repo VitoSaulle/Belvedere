@@ -116,7 +116,9 @@ public struct ClaudeReducer: TranscriptReducer {
 
     /// Campi comuni: cartella, branch, orari. Restituisce l'orario della riga.
     private mutating func noteCommon(_ obj: [String: Any]) -> Date? {
-        if let cwd = obj["cwd"] as? String, !cwd.isEmpty { snapshot.cwd = cwd }
+        // La cartella di avvio: dove `--resume` cerca la sessione e dove gira il suo processo.
+        // Le righe successive seguono i `cd` fatti durante la sessione.
+        if snapshot.cwd.isEmpty, let cwd = obj["cwd"] as? String, !cwd.isEmpty { snapshot.cwd = cwd }
         if let branch = obj["gitBranch"] as? String, !branch.isEmpty { snapshot.gitBranch = branch }
         let date = TranscriptDate.parse(obj["timestamp"])
         if let date {

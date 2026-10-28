@@ -60,6 +60,11 @@ import Testing
         #expect(reduced(all + [line]).snapshot.status == .idle)
     }
 
+    @Test func cwdIsWhereTheSessionStarted() {
+        let moved = Data(#"{"type":"user","cwd":"/Users/v/proj/sub","message":{"role":"user","content":"ancora"},"timestamp":"2026-10-28T11:00:00Z"}"#.utf8)
+        #expect(reduced(all + [moved]).snapshot.cwd == "/Users/v/proj")
+    }
+
     @Test func ignoresGarbage() {
         var r = reduced(all)
         let before = r.snapshot

@@ -67,3 +67,21 @@ public struct LaunchPreset: Codable, Identifiable, Equatable, Sendable {
         self.options = options.forNextLaunch
     }
 }
+
+extension LaunchOptions {
+    /// Le stesse scelte per riprendere `id`: nella cartella dove la sessione lavora davvero
+    /// (un worktree già creato), senza crearne un altro.
+    public func resuming(_ id: String, cwd: String?) -> LaunchOptions {
+        var o = self
+        o.resumeID = id
+        if let cwd, !cwd.isEmpty { o.folder = cwd }
+        o.worktree = false
+        return o
+    }
+
+    /// Opzioni per riprendere una sessione vista nei log; una sessione locale resta locale.
+    public static func resuming(_ s: SessionSnapshot) -> LaunchOptions {
+        let local = s.isLocalModel ? s.model.map { LocalModelChoice(id: $0, contextLength: s.contextWindow) } : nil
+        return LaunchOptions(folder: s.cwd, local: local, resumeID: s.id)
+    }
+}

@@ -86,8 +86,12 @@ public enum LaunchAdvice {
 public enum TerminalHandoff {
     /// Script `.command` che apre la sessione nel terminale con `claude --resume`.
     /// Scrive il proprio PID, che `exec` passa a claude: finché vive, Belvedere non riprende la sessione.
-    public static func script(cwd: String, sessionID: String, binary: String, pidFile: String) -> String {
-        "#!/bin/zsh\necho $$ > \(ClaudeCommand.quote(pidFile))\n"
+    /// `environment` porta le variabili di un modello locale, così la sessione non passa al cloud.
+    public static func script(cwd: String, sessionID: String, binary: String, pidFile: String,
+                              environment: [String: String] = [:]) -> String {
+        let exports = environment.sorted { $0.key < $1.key }
+            .map { "export \($0.key)=\(ClaudeCommand.quote($0.value))\n" }.joined()
+        return "#!/bin/zsh\necho $$ > \(ClaudeCommand.quote(pidFile))\n" + exports
             + "cd \(ClaudeCommand.quote(cwd)) && exec \(ClaudeCommand.quote(binary)) --resume \(ClaudeCommand.quote(sessionID))\n"
     }
 

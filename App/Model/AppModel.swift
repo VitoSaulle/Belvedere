@@ -53,6 +53,9 @@ final class AppModel {
     var newSessionFolder: String?
     /// Sessioni passate al terminale da questa esecuzione: osservate, così la vista si aggiorna subito.
     private(set) var handedOff: Set<String> = []
+    /// Cartelle con un `claude` vivo che non è di Belvedere (terminale, IntelliJ…), aggiornate ogni 5 s;
+    /// `nil` finché non sono state lette.
+    private(set) var busyFolders: Set<String>?
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
@@ -109,6 +112,7 @@ final class AppModel {
     func start() async {
         guard !started else { return }
         started = true
+        refreshBusyFolders()
         refreshHooksInstalled()
         loadHidden()
         if let data = UserDefaults.standard.data(forKey: Self.limitsKey),
@@ -267,6 +271,12 @@ final class AppModel {
             guard let self, let host else { return }
             self.hostChanged(host)
         }
+        host.resumeBlocker = { [weak self, weak host] in
+            guard let self, let host else { return nil }
+            let folder = host.state.cwd ?? host.options.folder
+            guard self.claudeFolders().contains(RunningProcesses.canonical(folder)) else { return nil }
+            return "Claude Code è già aperto in questa cartella, ad esempio in un terminale: chiudilo per continuare qui."
+        }
         hostedSessions.append(host)
         host.start()
         route = .session(host.state.sessionID ?? Self.provisionalPrefix + host.id.uuidString)
@@ -282,19 +292,30 @@ final class AppModel {
             return
         }
         let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: .claude)) ?? []
-        launch(LaunchOptions(folder: s.cwd, resumeID: sessionID), history: history)
+        launch(LaunchOptions.resuming(s), history: history)
     }
 
     /// «Riprendi in Belvedere» solo se la sessione non è viva altrove: mai due processi sulla stessa sessione.
     func canResumeHere(_ s: SessionSnapshot) -> Bool {
-        guard s.agent == .claude, !s.cwd.isEmpty, !isHosted(s.id),
-              s.status != .working, s.status != .waiting else { return false }
-        if let pid = s.origin?.pid, s.origin?.appName != "Belvedere", kill(pid, 0) == 0 { return false }
+        guard s.agent == .claude, !s.cwd.isEmpty, !isHosted(s.id) else { return false }
+        // Se nessun `claude` di altri lavora in quella cartella, la sessione non è viva altrove:
+        // vale anche dopo un crash (log fermo su «al lavoro») e per le sessioni nate prima di Belvedere.
+        guard let busyFolders, !busyFolders.contains(RunningProcesses.canonical(s.cwd)) else { return false }
         // Passata al terminale: finché quel processo vive, anche prima dei suoi hook, la sessione è sua.
         let pidFile = Self.handoffPID(s.id)
         // Appena passata il PID può non essere ancora scritto: intanto vale come occupata.
         if handedOff.contains(s.id), !FileManager.default.fileExists(atPath: pidFile.path) { return false }
         return !TerminalHandoff.isRunning(pidFile: pidFile)
+    }
+
+    /// Cartelle dei `claude` vivi, esclusi quelli lanciati da Belvedere.
+    private func claudeFolders() -> Set<String> {
+        RunningProcesses.folders(named: "claude", excluding: Set(hostedSessions.compactMap(\.pid)))
+    }
+
+    private func refreshBusyFolders() {
+        let folders = claudeFolders()
+        if folders != busyFolders { busyFolders = folders }
     }
 
     private static func handoffPID(_ id: String) -> URL {
@@ -316,14 +337,18 @@ final class AppModel {
         let folder = Belvedere.supportDirectory.appendingPathComponent("handoff")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent("\(s.id).command")
+        // Una sessione locale resta su LM Studio anche nel terminale.
+        let options = host.map { $0.options.resuming(s.id, cwd: s.cwd) } ?? LaunchOptions.resuming(s)
+        let local = options.local == nil ? [:] : ClaudeCommand.environment(options, base: [:])
         let script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
-                                            pidFile: Self.handoffPID(s.id).path)
+                                            pidFile: Self.handoffPID(s.id).path, environment: local)
         try? FileManager.default.removeItem(at: Self.handoffPID(s.id))
         handedOff.insert(s.id)
         do {
             try script.write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
             NSWorkspace.shared.open(url)
+            refreshBusyFolders()
         } catch {
             serverError = "Non riesco ad aprire il terminale: \(error.localizedDescription)"
         }
@@ -357,6 +382,9 @@ final class AppModel {
             }
             // La navigazione passa dall'id provvisorio a quello vero appena Claude lo comunica.
             if route == .session(Self.provisionalPrefix + host.id.uuidString) { route = .session(id) }
+        } else if let old = host.clearedFrom, route == .session(old) {
+            // Dopo /clear la chat resta questa, in attesa del nuovo id.
+            route = .session(Self.provisionalPrefix + host.id.uuidString)
         }
         if let limits = host.state.limits, limits != store.claudeLimits {
             store.apply(claudeLimits: limits)
@@ -367,8 +395,9 @@ final class AppModel {
 
     private func syncHosted() {
         let live = hostedSessions.filter(\.isRunning)
-        store.setHosted(Set(live.compactMap(\.state.sessionID)))
-        for host in live {
+        let exited = hostedSessions.filter { !$0.isRunning }
+        store.setHosted(Set(live.compactMap(\.state.sessionID)), exited: Set(exited.compactMap(\.state.sessionID)))
+        for host in hostedSessions {
             if let snapshot = host.state.snapshot(launchedAt: host.launchedAt) { store.apply(hosted: snapshot) }
         }
         store.tick(now: Date())
@@ -451,6 +480,7 @@ final class AppModel {
     }
 
     private func tick() {
+        refreshBusyFolders()
         store.tick(now: Date())
         publish()
     }

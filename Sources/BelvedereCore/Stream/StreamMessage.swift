@@ -58,6 +58,8 @@ public struct TurnResult: Equatable, Sendable {
     public let costUSD: Double?
     public let contextTokens: Int?
     public let contextWindow: Int?
+    /// Testo del risultato: per un turno in errore è il messaggio della CLI (es. login scaduto).
+    public var message: String? = nil
 }
 
 /// Una riga dell'output stream-json di `claude -p`.
@@ -172,6 +174,7 @@ public enum StreamMessage: Equatable, Sendable {
         if case .bool(let b)? = json["is_error"] { isError = b } else { isError = false }
         return .result(TurnResult(isError: isError, subtype: json["subtype"]?.stringValue ?? "",
                                   costUSD: json["total_cost_usd"]?.numberValue,
-                                  contextTokens: contextTokens, contextWindow: window))
+                                  contextTokens: contextTokens, contextWindow: window,
+                                  message: json["result"]?.stringValue))
     }
 }

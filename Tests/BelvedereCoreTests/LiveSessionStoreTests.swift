@@ -75,6 +75,29 @@ import Testing
         #expect(store.sessions.first { $0.id == "s2" }?.pending != nil)
     }
 
+    @Test func exitedHostedSessionStaysStopped() {
+        var store = LiveSessionStore()
+        store.apply(IndexUpdate(changed: [logSnapshot(status: .working)], newBuckets: []))
+        var ended = SessionSnapshot(id: "s1", agent: .claude, cwd: "/p")
+        ended.status = .ended
+        ended.lastActivity = Date().addingTimeInterval(-10)
+        store.setHosted([], exited: ["s1"])
+        store.apply(hosted: ended)
+        #expect(store.sessions.first?.status == .ended)
+    }
+
+    @Test func laterHookBeatsAnExitedHostedSession() {
+        var store = LiveSessionStore()
+        var ended = SessionSnapshot(id: "s1", agent: .claude, cwd: "/p")
+        ended.status = .ended
+        ended.lastActivity = Date().addingTimeInterval(-10)
+        store.setHosted([], exited: ["s1"])
+        store.apply(hosted: ended)
+        store.apply(hook("PermissionRequest", bash), origin: nil)
+        #expect(store.sessions.first?.status == .waiting)
+        #expect(store.sessions.first?.pending != nil)
+    }
+
     @Test func hostedOverlayWins() throws {
         var store = LiveSessionStore()
         var log = logSnapshot(status: .done)
