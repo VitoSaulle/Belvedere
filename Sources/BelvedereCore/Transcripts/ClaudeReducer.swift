@@ -6,6 +6,8 @@ public struct ClaudeReducer: TranscriptReducer {
     private var seenMessages = RecentSet()
     private var seenTools = RecentSet()
     private var pending: [String: UsageBucket] = [:]
+    /// Subagente «fork»: le righe prima del suo primo messaggio utente sono copie della madre, già contate.
+    private var inheritedContext = false
 
     public init(transcriptPath: String) {
         let id = ((transcriptPath as NSString).lastPathComponent as NSString).deletingPathExtension
@@ -13,7 +15,7 @@ public struct ClaudeReducer: TranscriptReducer {
         snapshot.contextWindow = ModelInfo.defaultContextWindow
     }
 
-    private static let wanted = ["assistant", "user", "ai-title", "cost-state"]
+    private static let wanted = ["assistant", "user", "ai-title", "cost-state", "fork-context-ref"]
     private static let markers = wanted.map { Data("\"\($0)\"".utf8) }
     private static let typePrefix = Data(#"{"type":""#.utf8)
     private static let wantedPrefixes = wanted.map { Data(#"{"type":"\#($0)""#.utf8) }
@@ -36,6 +38,8 @@ public struct ClaudeReducer: TranscriptReducer {
             if let title = obj["aiTitle"] as? String, !title.isEmpty { snapshot.title = title }
         case "cost-state":
             if let cost = (obj["totalCostUSD"] as? NSNumber)?.doubleValue { snapshot.costUSD = cost }
+        case "fork-context-ref":
+            inheritedContext = true
         default: break
         }
     }
@@ -57,7 +61,7 @@ public struct ClaudeReducer: TranscriptReducer {
         }
 
         if let id = message["id"] as? String, let usage = message["usage"] as? [String: Any],
-           seenMessages.insert(id) {
+           seenMessages.insert(id), !inheritedContext {
             let tokens = TokenTotals(input: Self.int(usage["input_tokens"]),
                                      output: Self.int(usage["output_tokens"]),
                                      cacheRead: Self.int(usage["cache_read_input_tokens"]),
@@ -90,6 +94,7 @@ public struct ClaudeReducer: TranscriptReducer {
 
     private mutating func consumeUser(_ obj: [String: Any]) {
         guard let message = obj["message"] as? [String: Any] else { return }
+        inheritedContext = false
         _ = noteCommon(obj)
         // I comandi locali (`/context`, `/cost`…) non aprono un turno: nessun assistant chiuderebbe lo stato.
         if let text = message["content"] as? String,

@@ -59,10 +59,15 @@ public actor TranscriptIndex {
         var reducer: AnyReducer
         /// Per le trascrizioni dei subagenti: la sessione madre a cui imputare il consumo.
         var parentSessionID: String?
+        /// Il file è sparito: l'entrata resta un giorno, così se ricompare (riscrittura atomica, spostamento)
+        /// riprende da dove era invece di ricontare tutto.
+        var goneAt: Date?
     }
 
+    static let tombstoneLifetime: TimeInterval = 24 * 3600
+
     /// Da aumentare quando cambia il modo in cui i riduttori leggono i log: la cache vecchia si ricostruisce.
-    static let cacheVersion = 5
+    static let cacheVersion = 6
 
     struct Cache: Codable {
         var version = TranscriptIndex.cacheVersion
@@ -98,7 +103,7 @@ public actor TranscriptIndex {
     /// Sessioni visibili (esclusi i subagenti), dalla più recente.
     public var sessions: [SessionSnapshot] {
         loadIfNeeded()
-        return entries.values.filter { $0.parentSessionID == nil }.map(\.reducer.snapshot)
+        return entries.values.filter { $0.parentSessionID == nil && $0.goneAt == nil }.map(\.reducer.snapshot)
             .sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
     }
 
@@ -129,6 +134,9 @@ public actor TranscriptIndex {
         for path in entries.keys where !foundPaths.contains(path) {
             if let ended = endSession(path) { changed.append(ended) }
         }
+        let now = Date()
+        let expired = entries.filter { $0.value.goneAt.map { now.timeIntervalSince($0) > Self.tombstoneLifetime } ?? false }
+        for path in expired.keys { entries.removeValue(forKey: path) }
         for (i, file) in found.enumerated() {
             if let result = process(file) {
                 if result.visible { changed.append(result.snapshot) }
@@ -247,8 +255,9 @@ public actor TranscriptIndex {
     private func process(_ file: FoundFile) -> (snapshot: SessionSnapshot, buckets: [UsageBucket], visible: Bool)? {
         var entry: Entry
         if let existing = entries[file.path] {
-            if existing.size == file.size && existing.mtime == file.mtime { return nil }
+            if existing.size == file.size && existing.mtime == file.mtime && existing.goneAt == nil { return nil }
             entry = existing
+            entry.goneAt = nil
         } else {
             let reducer: AnyReducer
             var parent: String?
@@ -300,7 +309,9 @@ public actor TranscriptIndex {
 
     /// Il file è sparito: la sessione esce dall'indice, il consumo resta nelle statistiche.
     private func endSession(_ path: String) -> SessionSnapshot? {
-        guard let entry = entries.removeValue(forKey: path) else { return nil }
+        guard var entry = entries[path], entry.goneAt == nil else { return nil }
+        entry.goneAt = Date()
+        entries[path] = entry
         dirty = true
         guard entry.parentSessionID == nil else { return nil }
         var snapshot = entry.reducer.snapshot

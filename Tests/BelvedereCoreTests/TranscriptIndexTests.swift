@@ -62,6 +62,24 @@ import Testing
         #expect(await index.sessions.count == 1)
     }
 
+    /// Un file sparito e ricomparso (riscrittura atomica, spostamento) non si riconta da capo.
+    @Test func reappearingFileIsNotCountedTwice() async throws {
+        let files = seed()
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let total = await index.buckets.reduce(0) { $0 + $1.tokens.output }
+        let saved = try Data(contentsOf: files.claude)
+        try FileManager.default.removeItem(at: files.claude)
+        _ = await index.refresh(paths: [files.claude.path])
+        #expect(await index.sessions.allSatisfy { $0.id != "s1" })
+        try saved.write(to: files.claude)
+        let update = await index.refresh(paths: [files.claude.path])
+        #expect(update.changed.map(\.id) == ["s1"])
+        #expect(update.newBuckets.isEmpty)
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.output } == total)
+        #expect(await index.sessions.contains { $0.id == "s1" })
+    }
+
     @Test func cacheRoundTrip() async throws {
         _ = seed()
         let first = TranscriptIndex(roots: roots, cacheURL: cacheURL)

@@ -16,6 +16,20 @@ import Testing
         #expect(reduced([line]).snapshot.gitBranch == nil)
     }
 
+    /// Un subagente «fork» comincia con la copia del messaggio della madre che lo ha lanciato:
+    /// quei token sono già contati nella madre.
+    @Test func forkCopyOfParentMessageIsNotCounted() {
+        let lines = [
+            #"{"type":"fork-context-ref","agentId":"a1","parentSessionId":"p","parentLastUuid":"u0","contextLength":2}"#,
+            #"{"type":"assistant","timestamp":"2026-10-28T10:00:00.000Z","message":{"id":"msg_parent","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":7,"cache_read_input_tokens":100,"cache_creation_input_tokens":0},"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{}}]}}"#,
+            #"{"type":"user","timestamp":"2026-10-28T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Fork started"}]}}"#,
+            #"{"type":"assistant","timestamp":"2026-10-28T10:00:02.000Z","message":{"id":"msg_fork","model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":10,"cache_creation_input_tokens":0},"content":[{"type":"text","text":"ok"}]}}"#,
+        ].map { Data($0.utf8) }
+        var r = reduced(lines)
+        #expect(r.snapshot.tokens == TokenTotals(input: 1, output: 2, cacheRead: 10, cacheWrite: 0))
+        #expect(r.drainUsage().reduce(TokenTotals()) { $0 + $1.tokens } == TokenTotals(input: 1, output: 2, cacheRead: 10, cacheWrite: 0))
+    }
+
     @Test func countsEachMessageOnce() {
         let s = reduced(all).snapshot
         #expect(s.tokens == TokenTotals(input: 18, output: 90, cacheRead: 4500, cacheWrite: 650))
