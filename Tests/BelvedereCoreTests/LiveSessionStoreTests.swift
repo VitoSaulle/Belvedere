@@ -327,32 +327,96 @@ import Testing
         #expect(store.sessions.map(\.id) == ["c", "b", "a"])
     }
 
-    @Test func restoredClaudeLimitsAreUsed() {
+    static let pA = UUID(), pB = UUID(), pX = UUID()
+
+    /// Due profili Claude e uno Codex; `pA` e `pX` sono i predefiniti.
+    private func profiledStore() -> LiveSessionStore {
         var store = LiveSessionStore()
+        store.setRoots(TranscriptRoots([
+            TranscriptRoot(profileID: Self.pA, agent: .claude, url: URL(fileURLWithPath: "/h/.claude/projects")),
+            TranscriptRoot(profileID: Self.pB, agent: .claude, url: URL(fileURLWithPath: "/h/.claude-b/projects")),
+            TranscriptRoot(profileID: Self.pX, agent: .codex, url: URL(fileURLWithPath: "/h/.codex/sessions")),
+        ]))
+        store.setDefaults([.claude: Self.pA, .codex: Self.pX])
+        return store
+    }
+
+    private func statusLine(_ session: String, path: String, percent: Int, now: Date) throws -> StatusLinePayload {
+        let json = #"{"session_id":"\#(session)","transcript_path":"\#(path)","rate_limits":{"five_hour":{"used_percentage":\#(percent),"resets_at":\#(Int(now.timeIntervalSince1970) + 3600)}}}"#
+        return try StatusLinePayload.decode(Data(json.utf8), now: now)
+    }
+
+    @Test func restoredClaudeLimitsAreUsed() {
+        var store = profiledStore()
         let now = Date()
         let saved = PlanLimits(fiveHour: LimitWindow(usedPercent: 13, resetsAt: now.addingTimeInterval(3600)),
                                weekly: nil, observedAt: now.addingTimeInterval(-300))
-        store.apply(claudeLimits: saved)
+        store.restore(claudeLimits: [Self.pA: saved])
         store.tick(now: now)
-        #expect(store.planLimits(.claude) == saved)
-        #expect(store.claudeLimits == saved)
+        #expect(store.planLimits(profile: Self.pA) == saved)
+        #expect(store.claudeLimits == [Self.pA: saved])
     }
 
     /// Claude e Codex sono due piani diversi: i limiti restano separati, anche se quelli di Codex sono più recenti.
     @Test func planLimitsStaySeparateAndDropExpired() throws {
-        var store = LiveSessionStore()
+        var store = profiledStore()
         let now = Date()
-        store.apply(codexLimits: PlanLimits(fiveHour: LimitWindow(usedPercent: 10, resetsAt: now.addingTimeInterval(3600)),
-                                            weekly: nil, observedAt: now))
-        #expect(store.planLimits(.claude) == nil)
-        #expect(store.planLimits(.codex)?.fiveHour?.usedPercent == 10)
+        store.apply(codexLimits: [Self.pX: PlanLimits(fiveHour: LimitWindow(usedPercent: 10, resetsAt: now.addingTimeInterval(3600)),
+                                                      weekly: nil, observedAt: now)])
+        #expect(store.planLimits(profile: Self.pA) == nil)
+        #expect(store.planLimits(profile: Self.pX)?.fiveHour?.usedPercent == 10)
         let json = #"{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":62,"resets_at":\#(Int(now.timeIntervalSince1970) - 10)},"seven_day":{"used_percentage":30,"resets_at":\#(Int(now.timeIntervalSince1970) + 86400)}}}"#
         store.apply(try StatusLinePayload.decode(Data(json.utf8), now: now.addingTimeInterval(-60)))
         store.tick(now: now)
-        let limits = try #require(store.planLimits(.claude))
+        let limits = try #require(store.planLimits(profile: Self.pA))
         #expect(limits.fiveHour == nil)
         #expect(limits.weekly?.usedPercent == 30)
-        #expect(store.planLimits(.codex)?.fiveHour?.usedPercent == 10)
+        #expect(store.planLimits(profile: Self.pX)?.fiveHour?.usedPercent == 10)
+    }
+
+    @Test func hookOnlySessionGetsProfileFromPath() throws {
+        var store = profiledStore()
+        let json = #"{"session_id":"n1","cwd":"/p","transcript_path":"/h/.claude-b/projects/-p/n1.jsonl"}"#
+        store.apply(try HookEvent.decode(name: "SessionStart", body: Data(json.utf8)), origin: nil)
+        #expect(store.sessions.first?.profileID == Self.pB)
+    }
+
+    @Test func logProfileWins() {
+        var store = profiledStore()
+        var s = logSnapshot("s1", status: .idle)
+        s.profileID = Self.pB
+        store.apply(IndexUpdate(changed: [s], newBuckets: []))
+        #expect(store.sessions.first?.profileID == Self.pB)
+    }
+
+    @Test func statusLineLimitsGoToSessionProfile() throws {
+        var store = profiledStore()
+        let now = Date()
+        store.apply(try statusLine("n1", path: "/h/.claude-b/projects/-p/n1.jsonl", percent: 40, now: now))
+        store.tick(now: now)
+        #expect(store.planLimits(profile: Self.pB)?.fiveHour?.usedPercent == 40)
+        #expect(store.planLimits(profile: Self.pA) == nil)
+    }
+
+    @Test func unknownPathFallsBackToDefault() throws {
+        var store = profiledStore()
+        let now = Date()
+        store.apply(try statusLine("n1", path: "/altrove/n1.jsonl", percent: 20, now: now))
+        store.tick(now: now)
+        #expect(store.planLimits(profile: Self.pA)?.fiveHour?.usedPercent == 20)
+        #expect(store.sessions.first?.profileID == nil || store.sessions.first?.profileID == Self.pA)
+    }
+
+    @Test func expiredWindowsDropPerProfile() throws {
+        var store = profiledStore()
+        let now = Date()
+        store.apply(claudeLimits: PlanLimits(fiveHour: LimitWindow(usedPercent: 90, resetsAt: now.addingTimeInterval(-1)),
+                                             weekly: nil, observedAt: now.addingTimeInterval(-7200)), profile: Self.pB)
+        store.apply(claudeLimits: PlanLimits(fiveHour: LimitWindow(usedPercent: 5, resetsAt: now.addingTimeInterval(3600)),
+                                             weekly: nil, observedAt: now), profile: Self.pA)
+        store.tick(now: now)
+        #expect(store.planLimits(profile: Self.pB) == nil)
+        #expect(store.planLimits(profile: Self.pA)?.fiveHour?.usedPercent == 5)
     }
 }
 

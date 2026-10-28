@@ -10,6 +10,8 @@ public struct StatusLinePayload: Sendable {
     public let contextWindowSize: Int?
     public let costUSD: Double?
     public let limits: PlanLimits?
+    /// Dentro la cartella del profilo: dice a quale account appartiene la sessione.
+    public var transcriptPath: String? = nil
 
     public enum DecodeError: Error { case notAnObject, missingSessionID }
 
@@ -32,7 +34,8 @@ public struct StatusLinePayload: Sendable {
             contextUsedPercent: (context["used_percentage"] as? NSNumber)?.doubleValue,
             contextWindowSize: (context["context_window_size"] as? NSNumber)?.intValue,
             costUSD: ((obj["cost"] as? [String: Any])?["total_cost_usd"] as? NSNumber)?.doubleValue,
-            limits: fiveHour == nil && weekly == nil ? nil : PlanLimits(fiveHour: fiveHour, weekly: weekly, observedAt: now))
+            limits: fiveHour == nil && weekly == nil ? nil : PlanLimits(fiveHour: fiveHour, weekly: weekly, observedAt: now),
+            transcriptPath: obj["transcript_path"] as? String)
     }
 
     private static func window(_ raw: Any?) -> LimitWindow? {

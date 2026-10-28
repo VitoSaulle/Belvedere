@@ -26,14 +26,17 @@ public struct LiveSessionStore: Sendable {
     private var logs: [String: SessionSnapshot] = [:]
     private var hooks: [String: HookState] = [:]
     private var statusLines: [String: StatusLineState] = [:]
-    private var codexLimits: PlanLimits?
+    private var codexLimits: [UUID: PlanLimits] = [:]
+    /// Radici dei profili e profilo predefinito per CLI: attribuiscono una sessione al suo account.
+    private var roots = TranscriptRoots([])
+    private var defaults: [AgentKind: UUID] = [:]
     /// Sessioni lanciate da Belvedere e ancora vive: la loro chat è la fonte di stato e richieste.
     private var hostedIDs: Set<String> = []
     /// Sessioni di Belvedere il cui processo è uscito: restano ferme finché un hook non dice altro.
     private var exitedIDs: Set<String> = []
     private var hosted: [String: SessionSnapshot] = [:]
-    /// Ultimi limiti letti dalla status line: l'app li salva e li ripristina all'avvio.
-    public private(set) var claudeLimits: PlanLimits?
+    /// Ultimi limiti letti dalla status line, per profilo: l'app li salva e li ripristina all'avvio.
+    public private(set) var claudeLimits: [UUID: PlanLimits] = [:]
     /// Finestra di contesto per modello Claude, vista da status line e chat ospitate: il log non la dice.
     /// L'app la salva e la ripristina all'avvio.
     public private(set) var knownWindows: [String: Int] = [:]
@@ -100,7 +103,27 @@ public struct LiveSessionStore: Sendable {
         statusLines[status.sessionID] = StatusLineState(payload: status, at: at)
         // L'id della status line è quello in uso (dopo `/model`) e distingue la variante `[1m]`.
         if let model = status.modelID { learnWindow(status.contextWindowSize, for: model) }
-        if let limits = status.limits { claudeLimits = limits }
+        if let limits = status.limits, let profile = profileID(of: status.sessionID, agent: .claude) {
+            claudeLimits[profile] = limits
+        }
+    }
+
+    public mutating func setRoots(_ roots: TranscriptRoots) {
+        self.roots = roots
+    }
+
+    public mutating func setDefaults(_ defaults: [AgentKind: UUID]) {
+        self.defaults = defaults
+    }
+
+    /// Il profilo di una sessione: quello dei log, poi la cartella della trascrizione vista da hook
+    /// o status line, infine il predefinito della CLI.
+    func profileID(of id: String, agent: AgentKind) -> UUID? {
+        if let known = logs[id]?.profileID ?? hosted[id]?.profileID { return known }
+        for path in [hooks[id]?.transcriptPath, statusLines[id]?.payload.transcriptPath] {
+            if let path, let root = roots.root(containing: path) { return root.profileID }
+        }
+        return defaults[agent]
     }
 
     public mutating func setHosted(_ ids: Set<String>, exited: Set<String> = []) {
@@ -128,11 +151,15 @@ public struct LiveSessionStore: Sendable {
         knownWindows[model] = window
     }
 
-    public mutating func apply(claudeLimits limits: PlanLimits?) {
+    public mutating func apply(claudeLimits limits: PlanLimits?, profile: UUID) {
+        claudeLimits[profile] = limits
+    }
+
+    public mutating func restore(claudeLimits limits: [UUID: PlanLimits]) {
         claudeLimits = limits
     }
 
-    public mutating func apply(codexLimits limits: PlanLimits?) {
+    public mutating func apply(codexLimits limits: [UUID: PlanLimits]) {
         codexLimits = limits
     }
 
@@ -174,9 +201,9 @@ public struct LiveSessionStore: Sendable {
 
     public var waitingCount: Int { sessions.filter { $0.status == .waiting }.count }
 
-    /// Limiti del piano di un agente, senza le finestre già azzerate.
-    public func planLimits(_ agent: AgentKind) -> PlanLimits? {
-        guard var limits = agent == .claude ? claudeLimits : codexLimits else { return nil }
+    /// Limiti del piano di un profilo, senza le finestre già azzerate.
+    public func planLimits(profile: UUID) -> PlanLimits? {
+        guard var limits = claudeLimits[profile] ?? codexLimits[profile] else { return nil }
         let isExpired = { (w: LimitWindow?) in w?.resetsAt.map { $0 < now } ?? false }
         if isExpired(limits.fiveHour) { limits.fiveHour = nil }
         if isExpired(limits.weekly) { limits.weekly = nil }
@@ -198,7 +225,8 @@ public struct LiveSessionStore: Sendable {
             s = SessionSnapshot(id: id, agent: .claude, cwd: hook.cwd ?? "", transcriptPath: hook.transcriptPath ?? "")
             s.lastActivity = hook.statusAt
             s.startedAt = hook.statusAt
-        } else if let live = hosted[id] {
+        } else if var live = hosted[id] {
+            if live.profileID == nil { live.profileID = profileID(of: id, agent: live.agent) }
             return live
         } else {
             return nil
@@ -253,6 +281,7 @@ public struct LiveSessionStore: Sendable {
             if s.cwd.isEmpty { s.cwd = live.cwd }
             if (s.lastActivity ?? .distantPast) < (live.lastActivity ?? .distantPast) { s.lastActivity = live.lastActivity }
         }
+        if s.profileID == nil { s.profileID = profileID(of: id, agent: s.agent) }
         // La CLI calcola il costo con i prezzi di Claude anche per un modello locale: non è un costo.
         if s.isLocalModel { s.costUSD = nil }
         return s

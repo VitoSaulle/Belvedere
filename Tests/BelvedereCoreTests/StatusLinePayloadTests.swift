@@ -27,6 +27,11 @@ import Testing
         #expect(partial.limits?.weekly?.usedPercent == 5)
     }
 
+    @Test func decodesTranscriptPath() throws {
+        let p = try StatusLinePayload.decode(Data(contentsOf: Fixture.url("statusline-sample.json")), now: now)
+        #expect(p.transcriptPath == "/path/to/transcript.json")
+    }
+
     @Test func rejectsInvalid() {
         #expect(throws: (any Error).self) { try StatusLinePayload.decode(Data("[]".utf8), now: now) }
         #expect(throws: (any Error).self) { try StatusLinePayload.decode(Data("{}".utf8), now: now) }
