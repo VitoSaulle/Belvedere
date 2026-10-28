@@ -21,7 +21,7 @@ struct RealLogsTests {
         for s in sessions.prefix(6) {
             print("REAL \(s.agent) \(s.status) \(s.displayName.prefix(40)) model=\(s.model ?? "-") ctx=\(s.contextTokens ?? 0)/\(s.contextWindow ?? 0) out=\(s.tokens.output) cost=\(s.costUSD ?? 0)")
         }
-        print("REAL codexLimits=\(String(describing: await index.latestCodexLimits))")
+        print("REAL codexLimits=\(String(describing: await index.latestCodexLimits(profile: TranscriptRoots.default.roots[1].profileID)))")
     }
 }
 

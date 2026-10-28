@@ -1,18 +1,46 @@
 import Foundation
 
-/// Cartelle in cui Claude Code e Codex scrivono le trascrizioni.
-public struct TranscriptRoots: Sendable {
-    public let claude: URL
-    public let codex: URL
+/// Cartella in cui una CLI scrive le trascrizioni di un profilo.
+public struct TranscriptRoot: Sendable, Equatable {
+    public let profileID: UUID
+    public let agent: AgentKind
+    public let url: URL
 
-    public init(claude: URL, codex: URL) {
-        self.claude = claude
-        self.codex = codex
+    public init(profileID: UUID, agent: AgentKind, url: URL) {
+        self.profileID = profileID
+        self.agent = agent
+        self.url = url
+    }
+}
+
+/// Le cartelle delle trascrizioni di tutti i profili.
+public struct TranscriptRoots: Sendable, Equatable {
+    public let roots: [TranscriptRoot]
+
+    public init(_ roots: [TranscriptRoot]) {
+        self.roots = roots
     }
 
-    public static var `default`: TranscriptRoots {
-        TranscriptRoots(claude: Belvedere.home.appendingPathComponent(".claude/projects", isDirectory: true),
-                        codex: Belvedere.home.appendingPathComponent(".codex/sessions", isDirectory: true))
+    public static func from(_ set: ProfileSet) -> TranscriptRoots {
+        TranscriptRoots(set.profiles.map { TranscriptRoot(profileID: $0.id, agent: $0.agent, url: $0.transcriptRoot) })
+    }
+
+    public static var `default`: TranscriptRoots { from(.initial(home: Belvedere.home)) }
+
+    public var urls: [URL] { roots.map(\.url) }
+
+    /// La radice che contiene il percorso, anche se la cartella del profilo è un link.
+    public func root(containing path: String) -> TranscriptRoot? {
+        let standard = URL(fileURLWithPath: path).standardizedFileURL.path
+        return roots.first { Self.relative(standard, to: $0.url) != nil }
+    }
+
+    static func relative(_ path: String, to root: URL) -> String? {
+        for base in [root.standardizedFileURL.path, root.resolvingSymlinksInPath().path] {
+            let prefix = base.hasSuffix("/") ? base : base + "/"
+            if path.hasPrefix(prefix) { return String(path.dropFirst(prefix.count)) }
+        }
+        return nil
     }
 }
 
@@ -76,7 +104,7 @@ public actor TranscriptIndex {
         var buckets: [String: UsageBucket]
     }
 
-    private let roots: TranscriptRoots
+    private var roots: TranscriptRoots
     private let cacheURL: URL
     private var entries: [String: Entry] = [:]
     private var bucketTable: [String: UsageBucket] = [:]
@@ -101,11 +129,42 @@ public actor TranscriptIndex {
         }
     }
 
-    /// Sessioni visibili (esclusi i subagenti), dalla più recente.
+    /// Sessioni visibili (esclusi i subagenti), dalla più recente. Lo stesso id in più profili
+    /// (cartella copiata a mano) compare una volta sola: vale il file modificato più di recente.
     public var sessions: [SessionSnapshot] {
         loadIfNeeded()
-        return entries.values.filter { $0.parentSessionID == nil && $0.goneAt == nil }.map(\.reducer.snapshot)
+        return preferredPaths().compactMap { path in entries[path].map { output(path, $0) } }
             .sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
+    }
+
+    /// Id di sessione presenti in più di un file.
+    public var duplicateCount: Int {
+        loadIfNeeded()
+        return Dictionary(grouping: liveTopLevel(), by: { $0.value.reducer.snapshot.id }).values.filter { $0.count > 1 }.count
+    }
+
+    private func liveTopLevel() -> [(key: String, value: Entry)] {
+        entries.filter { $0.value.parentSessionID == nil && $0.value.goneAt == nil }.map { ($0.key, $0.value) }
+    }
+
+    /// Per ogni id, il percorso del file più recente.
+    private func preferredPaths() -> [String] {
+        Dictionary(grouping: liveTopLevel(), by: { $0.value.reducer.snapshot.id }).values.compactMap { group in
+            group.max { a, b in a.value.mtime == b.value.mtime ? a.key > b.key : a.value.mtime < b.value.mtime }?.key
+        }
+    }
+
+    private func isPreferred(_ path: String, id: String) -> Bool {
+        let rivals = liveTopLevel().filter { $0.key != path && $0.value.reducer.snapshot.id == id }
+        guard let mine = entries[path] else { return false }
+        return rivals.allSatisfy { mine.mtime > $0.value.mtime || (mine.mtime == $0.value.mtime && path < $0.key) }
+    }
+
+    /// Lo snapshot con il profilo della radice che contiene il file.
+    private func output(_ path: String, _ entry: Entry) -> SessionSnapshot {
+        var snapshot = entry.reducer.snapshot
+        snapshot.profileID = roots.root(containing: path)?.profileID
+        return snapshot
     }
 
     public var buckets: [UsageBucket] {
@@ -113,12 +172,22 @@ public actor TranscriptIndex {
         return Array(bucketTable.values)
     }
 
-    public var latestCodexLimits: PlanLimits? {
+    /// Gli ultimi limiti del piano Codex visti nei file di un profilo.
+    public func latestCodexLimits(profile: UUID) -> PlanLimits? {
         loadIfNeeded()
-        return entries.values.compactMap { entry -> PlanLimits? in
-            if case .codex(let r) = entry.reducer { return r.planLimits }
-            return nil
+        guard let root = roots.roots.first(where: { $0.profileID == profile && $0.agent == .codex }) else { return nil }
+        return entries.compactMap { path, entry -> PlanLimits? in
+            guard case .codex(let r) = entry.reducer, TranscriptRoots.relative(path, to: root.url) != nil else { return nil }
+            return r.planLimits
         }.max { $0.observedAt < $1.observedAt }
+    }
+
+    /// Cambia i profili osservati: le sessioni delle radici tolte escono (il consumo resta),
+    /// quelle delle radici nuove entrano.
+    public func setRoots(_ newRoots: TranscriptRoots) async -> IndexUpdate {
+        loadIfNeeded()
+        roots = newRoots
+        return await refreshAll(progress: nil)
     }
 
     func offset(for path: String) -> UInt64? {
@@ -138,14 +207,18 @@ public actor TranscriptIndex {
         let now = Date()
         let expired = entries.filter { $0.value.goneAt.map { now.timeIntervalSince($0) > Self.tombstoneLifetime } ?? false }
         for path in expired.keys { entries.removeValue(forKey: path) }
+        var visible: [(path: String, snapshot: SessionSnapshot)] = []
         for (i, file) in found.enumerated() {
             if let result = process(file) {
-                if result.visible { changed.append(result.snapshot) }
+                if result.visible { visible.append((file.path, result.snapshot)) }
                 newBuckets += result.buckets
             }
             if i % 16 == 0 { await Task.yield() }
             progress?(Double(i + 1) / Double(found.count))
         }
+        // Con lo stesso id in più profili esce solo la copia preferita, calcolata una volta per tutte.
+        let preferred = Set(preferredPaths())
+        changed += visible.filter { preferred.contains($0.path) }.map(\.snapshot)
         if found.isEmpty { progress?(1) }
         return IndexUpdate(changed: changed, newBuckets: newBuckets)
     }
@@ -162,7 +235,7 @@ public actor TranscriptIndex {
                 continue
             }
             if let result = process(file) {
-                if result.visible { changed.append(result.snapshot) }
+                if result.visible, isPreferred(file.path, id: result.snapshot.id) { changed.append(result.snapshot) }
                 newBuckets += result.buckets
             }
         }
@@ -175,14 +248,16 @@ public actor TranscriptIndex {
     public func pollCodex(now: Date, calendar: Calendar = .current) async -> IndexUpdate {
         loadIfNeeded()
         var paths: Set<String> = []
-        for offset in [0, -1] {
+        for root in roots.roots where root.agent == .codex {
+          for offset in [0, -1] {
             guard let date = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
             let d = calendar.dateComponents([.year, .month, .day], from: date)
-            let dir = roots.codex.appendingPathComponent(String(format: "%04d/%02d/%02d", d.year ?? 0, d.month ?? 0, d.day ?? 0))
+            let dir = root.url.appendingPathComponent(String(format: "%04d/%02d/%02d", d.year ?? 0, d.month ?? 0, d.day ?? 0))
             let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
             for name in names where name.hasPrefix("rollout-") && name.hasSuffix(".jsonl") {
                 paths.insert(dir.appendingPathComponent(name).standardizedFileURL.path)
             }
+          }
         }
         for (path, entry) in entries {
             if case .codex = entry.reducer, now.timeIntervalSince(entry.mtime) < 48 * 3600 { paths.insert(path) }
@@ -243,20 +318,17 @@ public actor TranscriptIndex {
     private func classify(_ url: URL) -> Kind? {
         guard url.pathExtension == "jsonl" else { return nil }
         let path = url.standardizedFileURL.path
-        if let rel = Self.relative(path, to: roots.claude) {
-            let parts = rel.split(separator: "/")
-            if parts.count == 2 { return .claude(parent: nil) }
-            if parts.count == 4, parts[2] == "subagents" { return .claude(parent: String(parts[1])) }
-            return nil
-        }
-        if Self.relative(path, to: roots.codex) != nil, url.lastPathComponent.hasPrefix("rollout-") { return .codex }
-        return nil
-    }
-
-    private static func relative(_ path: String, to root: URL) -> String? {
-        for base in [root.standardizedFileURL.path, root.resolvingSymlinksInPath().path] {
-            let prefix = base.hasSuffix("/") ? base : base + "/"
-            if path.hasPrefix(prefix) { return String(path.dropFirst(prefix.count)) }
+        for root in roots.roots {
+            guard let rel = TranscriptRoots.relative(path, to: root.url) else { continue }
+            switch root.agent {
+            case .claude:
+                let parts = rel.split(separator: "/")
+                if parts.count == 2 { return .claude(parent: nil) }
+                if parts.count == 4, parts[2] == "subagents" { return .claude(parent: String(parts[1])) }
+                return nil
+            case .codex:
+                return url.lastPathComponent.hasPrefix("rollout-") ? .codex : nil
+            }
         }
         return nil
     }
@@ -271,9 +343,10 @@ public actor TranscriptIndex {
     /// Tutte le trascrizioni, dalla modificata più di recente.
     private func discover() -> [FoundFile] {
         var found: [FoundFile] = []
-        for root in [roots.claude, roots.codex] {
+        for root in roots.urls {
+            // L'enumeratore non entra in una radice che è un link (`~/.claude-lavoro` → altro disco).
             guard let walker = FileManager.default.enumerator(
-                at: root, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
+                at: root.resolvingSymlinksInPath(), includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             for case let url as URL in walker {
                 if let kind = classify(url), let file = stat(url, kind: kind) { found.append(file) }
@@ -284,6 +357,7 @@ public actor TranscriptIndex {
 
     private func process(_ file: FoundFile) -> (snapshot: SessionSnapshot, buckets: [UsageBucket], visible: Bool)? {
         var entry: Entry
+        let isNew = entries[file.path] == nil
         if let existing = entries[file.path] {
             if existing.size == file.size && existing.mtime == file.mtime && existing.goneAt == nil { return nil }
             entry = existing
@@ -307,6 +381,8 @@ public actor TranscriptIndex {
             entry.reducer = Self.freshReducer(like: entry.reducer, path: file.path)
         }
         var buckets = entry.reducer.consume(lines)
+        // Copia di una conversazione già indicizzata in un altro profilo: il suo consumo è già contato.
+        if isNew, isDuplicate(file.path, entry) { buckets = [] }
         if let parent = entry.parentSessionID {
             buckets = buckets.map {
                 UsageBucket(day: $0.day, sessionID: parent, agent: $0.agent, project: $0.project, model: $0.model,
@@ -318,7 +394,17 @@ public actor TranscriptIndex {
         entries[file.path] = entry
         dirty = true
         for bucket in buckets { merge(bucket) }
-        return (entry.reducer.snapshot, buckets, entry.parentSessionID == nil)
+        return (output(file.path, entry), buckets, entry.parentSessionID == nil)
+    }
+
+    /// Un altro file vivo con la stessa sessione (o lo stesso subagente della stessa sessione).
+    private func isDuplicate(_ path: String, _ entry: Entry) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        return entries.contains { other, e in
+            guard other != path, e.goneAt == nil, e.parentSessionID == entry.parentSessionID else { return false }
+            if entry.parentSessionID != nil { return (other as NSString).lastPathComponent == name }
+            return e.reducer.snapshot.id == entry.reducer.snapshot.id
+        }
     }
 
     private static func freshReducer(like reducer: AnyReducer, path: String) -> AnyReducer {
@@ -344,7 +430,12 @@ public actor TranscriptIndex {
         entries[path] = entry
         dirty = true
         guard entry.parentSessionID == nil else { return nil }
-        var snapshot = entry.reducer.snapshot
+        // Resta un'altra copia della stessa sessione (altro profilo): quella prende il posto di questa.
+        let id = entry.reducer.snapshot.id
+        if let other = liveTopLevel().filter({ $0.value.reducer.snapshot.id == id }).max(by: { $0.value.mtime < $1.value.mtime }) {
+            return output(other.key, other.value)
+        }
+        var snapshot = output(path, entry)
         snapshot.status = .ended
         return snapshot
     }

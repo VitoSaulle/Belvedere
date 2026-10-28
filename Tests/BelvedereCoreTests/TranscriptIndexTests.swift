@@ -4,8 +4,12 @@ import Testing
 
 @Suite struct TranscriptIndexTests {
     let tmp = TempDir()
-    var roots: TranscriptRoots {
-        TranscriptRoots(claude: tmp.url.appendingPathComponent("claude"), codex: tmp.url.appendingPathComponent("codex"))
+    let roots: TranscriptRoots
+    init() {
+        roots = TranscriptRoots([
+            TranscriptRoot(profileID: UUID(), agent: .claude, url: tmp.url.appendingPathComponent("claude")),
+            TranscriptRoot(profileID: UUID(), agent: .codex, url: tmp.url.appendingPathComponent("codex")),
+        ])
     }
     var cacheURL: URL { tmp.url.appendingPathComponent("index.json") }
     private func text(_ name: String) -> String { try! String(contentsOf: Fixture.url(name), encoding: .utf8) }
@@ -24,7 +28,7 @@ import Testing
         let sessions = await index.sessions
         #expect(update.changed.count == 2)
         #expect(Set(sessions.map(\.agent)) == [.claude, .codex])
-        #expect(await index.latestCodexLimits?.fiveHour?.usedPercent == 21)
+        #expect(await index.latestCodexLimits(profile: roots.roots[1].profileID)?.fiveHour?.usedPercent == 21)
         #expect(!(await index.buckets).isEmpty)
     }
 
@@ -241,5 +245,80 @@ extension TranscriptIndexTests {
             try await Task.sleep(for: .milliseconds(100))
         }
         #expect(seen.withLock { $0.contains { ($0 as NSString).resolvingSymlinksInPath == (f.path as NSString).resolvingSymlinksInPath } })
+    }
+}
+
+extension TranscriptIndexTests {
+    // MARK: - Profili
+
+    static let pA = UUID(), pB = UUID(), pX = UUID(), pY = UUID()
+
+    private func profileRoots(claude2: URL? = nil, withB: Bool = true, codex2: Bool = false) -> TranscriptRoots {
+        var list = [TranscriptRoot(profileID: Self.pA, agent: .claude, url: tmp.url.appendingPathComponent("claude"))]
+        if withB { list.append(TranscriptRoot(profileID: Self.pB, agent: .claude, url: claude2 ?? tmp.url.appendingPathComponent("claude2"))) }
+        list.append(TranscriptRoot(profileID: Self.pX, agent: .codex, url: tmp.url.appendingPathComponent("codex")))
+        if codex2 { list.append(TranscriptRoot(profileID: Self.pY, agent: .codex, url: tmp.url.appendingPathComponent("codex2"))) }
+        return TranscriptRoots(list)
+    }
+
+    @Test func snapshotsCarryProfile() async {
+        _ = seed()
+        _ = tmp.file("claude2/-Users-v-proj/s2.jsonl", text("claude-sample.jsonl").replacingOccurrences(of: "\"s1\"", with: "\"s2\""))
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        let update = await index.refreshAll(progress: nil)
+        let byID = Dictionary(uniqueKeysWithValues: await index.sessions.map { ($0.id, $0.profileID) })
+        #expect(byID["s1"] == Self.pA)
+        #expect(byID["s2"] == Self.pB)
+        #expect(byID["01a1494b-8ccc-7553-99cb-df33363f95a1"] == Self.pX)
+        #expect(update.changed.allSatisfy { $0.profileID != nil })
+    }
+
+    @Test func symlinkedRootIsClassified() async throws {
+        _ = seed()
+        _ = tmp.file("real2/-Users-v-proj/s2.jsonl", text("claude-sample.jsonl").replacingOccurrences(of: "\"s1\"", with: "\"s2\""))
+        let link = tmp.url.appendingPathComponent("claude2")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: tmp.url.appendingPathComponent("real2"))
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.first { $0.id == "s2" }?.profileID == Self.pB)
+    }
+
+    @Test func setRootsRemovesAndAdds() async {
+        _ = seed()
+        _ = tmp.file("claude2/-Users-v-proj/s2.jsonl", text("claude-sample.jsonl").replacingOccurrences(of: "\"s1\"", with: "\"s2\""))
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let total = await index.buckets.reduce(0) { $0 + $1.tokens.total }
+        let removed = await index.setRoots(profileRoots(withB: false))
+        #expect(removed.changed.first { $0.id == "s2" }?.status == .ended)
+        #expect(await index.sessions.allSatisfy { $0.id != "s2" })
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+        _ = await index.setRoots(profileRoots())
+        #expect(await index.sessions.first { $0.id == "s2" }?.profileID == Self.pB)
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
+
+    @Test func duplicateIDKeepsNewestAndCountsOnce() async throws {
+        _ = seed()
+        let single = TranscriptIndex(roots: profileRoots(withB: false), cacheURL: tmp.url.appendingPathComponent("single.json"))
+        _ = await single.refreshAll(progress: nil)
+        let once = await single.buckets.reduce(0) { $0 + $1.tokens.total }
+        let copy = tmp.file("claude2/-Users-v-proj/s1.jsonl", text("claude-sample.jsonl"))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: copy.path)
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let s1 = await index.sessions.filter { $0.id == "s1" }
+        #expect(s1.count == 1)
+        #expect(s1.first?.profileID == Self.pB)
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == once)
+        #expect(await index.duplicateCount == 1)
+    }
+
+    @Test func codexLimitsPerProfile() async {
+        _ = seed()
+        let index = TranscriptIndex(roots: profileRoots(codex2: true), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.latestCodexLimits(profile: Self.pX)?.fiveHour?.usedPercent == 21)
+        #expect(await index.latestCodexLimits(profile: Self.pY) == nil)
     }
 }
