@@ -1,7 +1,11 @@
+import AppKit
 import BelvedereCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Campo della chat: ⏎ invia, ⇧⏎ va a capo, `/` per i comandi, `@` per i file.
+/// Allegati come nel terminale: le immagini (graffetta, trascinate o incollate con ⌘V) partono col messaggio,
+/// gli altri file entrano nel testo come `@percorso`.
 struct Composer: View {
     @Environment(AppModel.self) private var model
     let host: HostedSession
@@ -10,6 +14,8 @@ struct Composer: View {
     @State private var terminalOnly: String?
     @State private var files: [String] = []
     @State private var showErrorDetail = false
+    @State private var images: [ImageAttachment] = []
+    @State private var paste = PasteMonitor()
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -29,13 +35,52 @@ struct Composer: View {
         .padding(.bottom, 14)
         .frame(maxWidth: 760)
         .task(id: fileQuery) { await loadFiles() }
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            paste.start { pasteFromClipboard() }
+        }
+        .onDisappear { paste.stop() }
+        .onChange(of: focused, initial: true) { _, on in paste.active = on }
+        .dropDestination(for: URL.self) { urls, _ in
+            attach(urls)
+            return !urls.isEmpty
+        }
     }
 
     // MARK: - Campo
 
     private var field: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !images.isEmpty { imageStrip }
+            fieldRow
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 6)
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+    }
+
+    private var imageStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(images) { image in
+                    ImageChip(image: image) { images.removeAll { $0 == image } }
+                }
+            }
+            .padding(.top, 6)
+        }
+        .scrollIndicators(.never)
+    }
+
+    private var fieldRow: some View {
         HStack(alignment: .bottom, spacing: 10) {
+            Button(action: choose) {
+                Image(systemName: "paperclip").font(.system(size: 14, weight: .medium))
+                    .frame(width: 24, height: 28)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Allega immagini o file")
             TextField("Scrivi a \(Theme.agentName(host.agent)), / per i comandi, @ per i file", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
@@ -87,19 +132,17 @@ struct Composer: View {
             .disabled(!canSend)
             .help("Invia (⏎)")
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .padding(.vertical, 6)
-        .glassEffect(.regular, in: .rect(cornerRadius: 22))
     }
 
-    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty }
 
     private func send() {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty else { return }
+        guard !message.isEmpty || !images.isEmpty else { return }
         terminalOnly = nil
-        switch host.send(message) {
+        let attached = images
+        images = []
+        switch host.send(message, images: attached) {
         case .terminalOnly(let name):
             terminalOnly = name
             return
@@ -112,6 +155,67 @@ struct Composer: View {
             break
         }
         text = ""
+    }
+
+    // MARK: - Allegati
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.directoryURL = URL(fileURLWithPath: host.state.cwd ?? host.options.folder)
+        panel.prompt = "Allega"
+        guard panel.runModal() == .OK else { return }
+        attach(panel.urls)
+    }
+
+    /// Immagini come allegati, il resto come `@percorso` nel testo (relativo alla cartella della sessione).
+    private func attach(_ urls: [URL]) {
+        var mentions: [String] = []
+        for url in urls where url.isFileURL {
+            if ImageAttachment.isImage(path: url.path) {
+                let image = ImageAttachment(path: url.path)
+                if !images.contains(image) { images.append(image) }
+            } else {
+                mentions.append(Self.mention(url.path, root: host.state.cwd ?? host.options.folder))
+            }
+        }
+        if !mentions.isEmpty {
+            let separator = text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? "" : " "
+            text += separator + mentions.joined(separator: " ") + " "
+        }
+        focused = true
+    }
+
+    static func mention(_ path: String, root: String) -> String {
+        let base = root.hasSuffix("/") ? root : root + "/"
+        let shown = path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
+        return shown.contains(" ") ? "@\"\(shown)\"" : "@\(shown)"
+    }
+
+    /// ⌘V: file copiati nel Finder o un'immagine negli appunti (uno screenshot). Il testo si incolla come sempre.
+    private func pasteFromClipboard() -> Bool {
+        let board = NSPasteboard.general
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            attach(urls)
+            return true
+        }
+        if board.string(forType: .string) != nil { return false }
+        guard let image = NSImage(pasteboard: board), let tiff = image.tiffRepresentation,
+              let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return false }
+        do {
+            let dir = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                .appendingPathComponent("it.vitosaulle.Belvedere/Allegati", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let stamp = Date().formatted(.verbatim("\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) alle \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)).\(minute: .twoDigits).\(second: .twoDigits)",
+                                                    timeZone: .current, calendar: .current))
+            let url = dir.appendingPathComponent("Immagine \(stamp).png")
+            try png.write(to: url)
+            images.append(ImageAttachment(path: url.path))
+            return true
+        } catch {
+            return false
+        }
     }
 
     // MARK: - Suggerimenti
@@ -225,5 +329,58 @@ struct Composer: View {
         }
         .padding(10)
         .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 12))
+    }
+}
+
+/// Miniatura di un'immagine allegata, con la × per toglierla.
+private struct ImageChip: View {
+    let image: ImageAttachment
+    let remove: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let thumbnail = NSImage(contentsOfFile: image.path) {
+                    Image(nsImage: thumbnail).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "photo").foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(.rect(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.12)))
+            .help(image.name)
+            Button(action: remove) {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                    .frame(width: 18, height: 18)
+                    .background(.regularMaterial, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .offset(x: 5, y: -5)
+            .help("Togli")
+        }
+        .padding(.trailing, 5)
+    }
+}
+
+/// Intercetta ⌘V mentre il campo ha il fuoco: `handler` restituisce true se ha gestito lui l'incolla.
+@MainActor
+final class PasteMonitor {
+    var active = false
+    private var monitor: Any?
+
+    func start(_ handler: @escaping @MainActor () -> Bool) {
+        stop()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.active,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers?.lowercased() == "v" else { return event }
+            return handler() ? nil : event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 }

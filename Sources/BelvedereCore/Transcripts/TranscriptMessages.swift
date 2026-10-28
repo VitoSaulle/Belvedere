@@ -56,8 +56,13 @@ public enum TranscriptMessages {
                 text = string
             } else {
                 let blocks = message["content"] as? [[String: Any]] ?? []
-                text = blocks.filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }
-                    .joined(separator: "\n").nilIfEmpty
+                text = blocks.compactMap { block -> String? in
+                    switch block["type"] as? String {
+                    case "text": block["text"] as? String
+                    case "image": "[Immagine]"
+                    default: nil
+                    }
+                }.joined(separator: "\n").nilIfEmpty
             }
             guard let text = visible(text) else { return [] }
             if text.hasPrefix("[Request interrupted by user") { return [.note(id: id, text: "Interrotto")] }

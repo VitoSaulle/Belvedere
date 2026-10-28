@@ -93,7 +93,12 @@ public enum CodexItems {
         switch item["type"]?.stringValue {
         case "userMessage":
             guard includeUser, case .array(let content)? = item["content"] else { return nil }
-            let text = content.compactMap { $0["text"]?.stringValue }.joined(separator: "\n")
+            let text = content.compactMap { part -> String? in
+                switch part["type"]?.stringValue {
+                case "image", "localImage": "[Immagine]"
+                default: part["text"]?.stringValue
+                }
+            }.joined(separator: "\n")
             return text.isEmpty ? nil : .user(id: id, text: text)
         case "agentMessage":
             guard let text = item["text"]?.stringValue, !text.isEmpty else { return nil }

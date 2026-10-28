@@ -9,8 +9,13 @@ public enum HostDecision: Equatable, Sendable {
 
 /// Righe da scrivere su stdin di `claude -p --input-format stream-json`.
 public enum StreamInput {
-    public static func user(_ text: String) -> Data {
-        line(["type": "user", "message": ["role": "user", "content": text]])
+    public static func user(_ text: String, images: [ImagePayload] = []) -> Data {
+        guard !images.isEmpty else { return line(["type": "user", "message": ["role": "user", "content": text]]) }
+        var blocks: [[String: Any]] = images.map {
+            ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.base64]]
+        }
+        if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
+        return line(["type": "user", "message": ["role": "user", "content": blocks]])
     }
 
     public static func initialize(requestID: String) -> Data {

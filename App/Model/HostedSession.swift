@@ -139,22 +139,27 @@ final class HostedSession: Identifiable {
 
     /// Instrada il testo: messaggi e comandi vanno a Claude, `/clear` e `/model` si gestiscono qui.
     /// Restituisce la rotta, così la vista può spiegare i comandi che funzionano solo nel terminale.
+    /// `images` vanno con il messaggio: a Claude in base64, a Codex come percorsi.
     @discardableResult
-    func send(_ text: String) -> SlashRoute {
-        let route = SlashRoute.route(text, terminalCommands: state.terminalCommands)
+    func send(_ text: String, images: [ImageAttachment] = []) -> SlashRoute {
+        let route = images.isEmpty ? SlashRoute.route(text, terminalCommands: state.terminalCommands) : .send(text)
         switch route {
         case .send(let message):
             if !isRunning { resumeIfPossible() }
-            state.userSent(message, now: Date())
+            state.userSent(ImageAttachment.displayText(message, names: images.map(\.name)), now: Date())
             // Senza processo il messaggio non parte: niente «al lavoro» e resta il motivo.
             guard isRunning else {
                 state.sendFailed(state.lastError ?? "\(agent.productName) non è avviato.", now: Date())
                 break
             }
             if codex != nil {
-                withCodex { c, _ in c.send(message) }
+                withCodex { c, _ in c.send(message, images: images.map(\.path)) }
             } else {
-                write(StreamInput.user(message))
+                var payloads: [ImagePayload] = []
+                for image in images {
+                    do { payloads.append(try image.payload()) } catch { state.addNote("\(image.name) non si legge: non è stata inviata") }
+                }
+                write(StreamInput.user(message, images: payloads))
             }
         case .setModel(let model):
             if codex != nil {

@@ -9,7 +9,7 @@ public struct CodexConversation: Sendable {
     private var nextID = 1
     private var pending: [Int: Purpose] = [:]
     /// Messaggi scritti prima che il thread esista.
-    private var queued: [String] = []
+    private var queued: [(text: String, images: [String])] = []
     /// Modello scelto con `/model`: va con il turno successivo e da lì resta a Codex.
     private var modelOverride: String?
     /// Richieste del server in attesa, per id della card.
@@ -43,16 +43,18 @@ public struct CodexConversation: Sendable {
                                 "capabilities": .null], purpose: .initialize)]
     }
 
-    public mutating func send(_ text: String) -> [Data] {
+    /// `images`: percorsi di immagini locali, passati a Codex come `localImage`.
+    public mutating func send(_ text: String, images: [String] = []) -> [Data] {
         guard let threadID else {
-            queued.append(text)
+            queued.append((text, images))
             guard threadFailed else { return [] }
             threadFailed = false
             return [startThread(resuming: options.resumeID)]
         }
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
-            "input": .array([.object(["type": .string("text"), "text": .string(text), "text_elements": .array([])])]),
+            "input": .array([.object(["type": .string("text"), "text": .string(text), "text_elements": .array([])])]
+                + images.map { .object(["type": .string("localImage"), "path": .string($0)]) }),
         ]
         if let modelOverride { params["model"] = .string(modelOverride) }
         modelOverride = nil
@@ -251,7 +253,7 @@ public struct CodexConversation: Sendable {
             }
             let waiting = queued
             queued = []
-            return waiting.flatMap { send($0) }
+            return waiting.flatMap { send($0.text, images: $0.images) }
         case .turn, .interrupt:
             return []
         }
