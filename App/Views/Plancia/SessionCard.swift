@@ -37,6 +37,9 @@ struct SessionCard: View {
         .onTapGesture { model.route = .session(session.id) }
         .contextMenu {
             Button("Apri") { model.route = .session(session.id) }
+            if model.canResumeHere(session) {
+                Button("Riprendi in Belvedere") { model.resume(session.id) }
+            }
             if session.origin != nil {
                 Button("Vai a \(session.origin!.appName)") { model.activateOrigin(of: session.id) }
             }
@@ -74,8 +77,13 @@ struct SessionCard: View {
                 }
             }
             Spacer(minLength: 6)
+            if model.host(for: session.id)?.options.permission == .skip {
+                Tag(text: "Permessi saltati", tint: Theme.danger)
+            }
             if let origin = session.origin {
                 Tag(text: origin.appName)
+            } else if model.launchedIDs.contains(session.id) {
+                Tag(text: "Belvedere")
             }
         }
     }
@@ -158,6 +166,11 @@ struct PendingBox: View {
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
                     Button("Consenti") { model.respond(to: pending, with: .allow) }
+                        .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.capsule)
+                        .tint(Color.primary)
+                } else if model.host(for: session.id) != nil {
+                    Button("Rispondi") { model.route = .session(session.id) }
                         .buttonStyle(.borderedProminent)
                         .buttonBorderShape(.capsule)
                         .tint(Color.primary)

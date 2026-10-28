@@ -14,6 +14,12 @@ import Testing
         ])
     }
 
+    @Test func interruptionIsANote() {
+        let line: [String: Any] = ["type": "user", "uuid": "u9",
+                                   "message": ["role": "user", "content": [["type": "text", "text": "[Request interrupted by user for tool use]"]]]]
+        #expect(TranscriptMessages.claudeItems(line) == [.note(id: "u9", text: "Interrotto")])
+    }
+
     @Test func claudeDedupAndFilters() throws {
         let tmp = TempDir()
         let lines = [

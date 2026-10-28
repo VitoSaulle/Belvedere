@@ -75,12 +75,30 @@ struct TranscriptRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .tool(_, let name, let detail, let added, let removed):
             ToolRow(name: name, detail: detail, added: added, removed: removed)
+        case .note(_, let text):
+            Label(text, systemImage: "stop.circle")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
     static func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
+        let parts = FencedBlocks.split(text)
+        var out = AttributedString()
+        for (index, part) in parts.enumerated() {
+            switch part {
+            case .text(let text):
+                out += (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                    ?? AttributedString(text)
+            case .code(let code):
+                var block = AttributedString(code)
+                block.font = .system(size: 12.5, design: .monospaced)
+                out += block
+                if index < parts.count - 1 { out += AttributedString("\n") }
+            }
+        }
+        return out
     }
 }
 
@@ -140,5 +158,71 @@ struct WorkingIndicator: View {
             Text("Sta lavorando…").font(.system(size: 13)).foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// Conversazione dal vivo di una sessione lanciata da Belvedere: messaggi, testo in arrivo, richieste.
+struct HostedTranscript: View {
+    let host: HostedSession
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if host.state.items.isEmpty && host.state.streaming == nil && host.state.asks.isEmpty {
+                        Text(host.isRunning ? "Scrivi il primo messaggio." : "La sessione non è avviata.")
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 60)
+                    }
+                    ForEach(host.state.items) { item in
+                        TranscriptRow(item: item)
+                    }
+                    if let streaming = host.state.streaming {
+                        StreamingText(text: streaming)
+                    }
+                    ForEach(host.state.asks) { ask in
+                        if ask.isQuestion {
+                            QuestionCard(host: host, ask: ask)
+                        } else {
+                            PermissionCard(host: host, ask: ask)
+                        }
+                    }
+                    if host.state.status == .working && host.state.streaming == nil && host.state.asks.isEmpty {
+                        WorkingIndicator()
+                    }
+                    Color.clear.frame(height: 1).id("end")
+                }
+                .frame(maxWidth: 700)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 22)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollContentBackground(.hidden)
+            .defaultScrollAnchor(.bottom)
+            .onChange(of: host.state.items.count) { scrollToEnd(proxy) }
+            .onChange(of: host.state.asks.count) { scrollToEnd(proxy) }
+            .onChange(of: host.state.streaming?.count) { proxy.scrollTo("end", anchor: .bottom) }
+        }
+    }
+
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        withAnimation(.smooth(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
+    }
+}
+
+/// Testo dell'assistente mentre arriva, con un cursore che pulsa.
+struct StreamingText: View {
+    let text: String
+    @State private var on = true
+
+    var body: some View {
+        (Text(TranscriptRow.markdown(text)) + Text(" ▍").foregroundStyle(Theme.accent.opacity(on ? 1 : 0.2)))
+            .font(.system(size: 14))
+            .lineSpacing(4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.6).repeatForever()) { on = false }
+            }
     }
 }

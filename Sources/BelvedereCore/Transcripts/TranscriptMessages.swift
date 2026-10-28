@@ -5,10 +5,12 @@ public enum TranscriptItem: Identifiable, Sendable, Equatable {
     case user(id: String, text: String)
     case assistant(id: String, text: String)
     case tool(id: String, name: String, detail: String, added: Int?, removed: Int?)
+    /// Evento della sessione, non scritto da nessuno: ad esempio un'interruzione.
+    case note(id: String, text: String)
 
     public var id: String {
         switch self {
-        case .user(let id, _), .assistant(let id, _), .tool(let id, _, _, _, _): id
+        case .user(let id, _), .assistant(let id, _), .tool(let id, _, _, _, _), .note(let id, _): id
         }
     }
 }
@@ -58,6 +60,7 @@ public enum TranscriptMessages {
                     .joined(separator: "\n").nilIfEmpty
             }
             guard let text = visible(text) else { return [] }
+            if text.hasPrefix("[Request interrupted by user") { return [.note(id: id, text: "Interrotto")] }
             return [.user(id: id, text: text)]
         case "assistant":
             guard let messageID = message["id"] as? String else { return [] }

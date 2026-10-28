@@ -18,7 +18,8 @@ final class HostedSession: Identifiable {
 
     init(options: LaunchOptions, history: [TranscriptItem] = []) {
         self.options = options
-        state = ChatState(history: history)
+        state = options.resumeID.map { ChatState(history: history, resuming: $0, folder: options.folder) }
+            ?? ChatState(history: history)
     }
 
     var binary: String? {

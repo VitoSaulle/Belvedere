@@ -26,6 +26,14 @@ public struct ChatState: Sendable {
         items = history
     }
 
+    /// Una sessione ripresa con `--resume`: la CLI manda `init` solo al primo turno,
+    /// ma id e cartella sono già noti.
+    public init(history: [TranscriptItem] = [], resuming sessionID: String, folder: String) {
+        items = history
+        self.sessionID = sessionID
+        cwd = folder
+    }
+
     public mutating func apply(_ message: StreamMessage, now: Date) {
         switch message {
         case .initialized(let info):

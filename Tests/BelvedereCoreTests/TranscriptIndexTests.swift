@@ -75,6 +75,19 @@ import Testing
         #expect(await second.buckets.count == (await first.buckets).count)
     }
 
+    @Test func cacheFromOlderReducerIsRebuilt() async throws {
+        _ = seed()
+        let first = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await first.refreshAll(progress: nil)
+        try await first.save()
+        let current = #""version":\#(TranscriptIndex.cacheVersion)"#
+        let old = try String(contentsOf: cacheURL, encoding: .utf8).replacingOccurrences(of: current, with: #""version":1"#)
+        try old.write(to: cacheURL, atomically: true, encoding: .utf8)
+        let second = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        #expect(await second.sessions.isEmpty)
+        #expect(TranscriptIndex.cacheVersion > 1)
+    }
+
     @Test func progressReachesOne() async {
         _ = seed()
         let seen = Locked<[Double]>([])

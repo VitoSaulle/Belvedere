@@ -85,7 +85,16 @@ public enum LaunchAdvice {
 
 public enum TerminalHandoff {
     /// Script `.command` che apre la sessione nel terminale con `claude --resume`.
-    public static func script(cwd: String, sessionID: String, binary: String) -> String {
-        "#!/bin/zsh\ncd \(ClaudeCommand.quote(cwd)) && exec \(ClaudeCommand.quote(binary)) --resume \(ClaudeCommand.quote(sessionID))\n"
+    /// Scrive il proprio PID, che `exec` passa a claude: finché vive, Belvedere non riprende la sessione.
+    public static func script(cwd: String, sessionID: String, binary: String, pidFile: String) -> String {
+        "#!/bin/zsh\necho $$ > \(ClaudeCommand.quote(pidFile))\n"
+            + "cd \(ClaudeCommand.quote(cwd)) && exec \(ClaudeCommand.quote(binary)) --resume \(ClaudeCommand.quote(sessionID))\n"
+    }
+
+    /// Il processo aperto dallo script è ancora vivo (anche se fermo su una domanda del terminale).
+    public static func isRunning(pidFile: URL) -> Bool {
+        guard let text = try? String(contentsOf: pidFile, encoding: .utf8),
+              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)), pid > 0 else { return false }
+        return kill(pid, 0) == 0
     }
 }

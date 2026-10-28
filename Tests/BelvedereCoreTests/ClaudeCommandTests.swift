@@ -112,10 +112,22 @@ import Testing
     }
 
     @Test func handoffScriptQuotes() {
-        let script = TerminalHandoff.script(cwd: "/p/l'app", sessionID: "abc", binary: "/opt/homebrew/bin/claude")
+        let script = TerminalHandoff.script(cwd: "/p/l'app", sessionID: "abc", binary: "/opt/homebrew/bin/claude",
+                                            pidFile: "/s/abc.pid")
         #expect(script.hasPrefix("#!/bin/zsh\n"))
+        #expect(script.contains("echo $$ > '/s/abc.pid'"))
         #expect(script.contains("cd '/p/l'\\''app'"))
         #expect(script.contains("exec '/opt/homebrew/bin/claude' --resume 'abc'"))
+    }
+
+    @Test func handoffIsRunningWhileItsProcessLives() throws {
+        let tmp = TempDir()
+        let file = tmp.url.appendingPathComponent("abc.pid")
+        #expect(!TerminalHandoff.isRunning(pidFile: file))
+        try "\(getpid())\n".write(to: file, atomically: true, encoding: .utf8)
+        #expect(TerminalHandoff.isRunning(pidFile: file))
+        try "999999".write(to: file, atomically: true, encoding: .utf8)
+        #expect(!TerminalHandoff.isRunning(pidFile: file))
     }
 
     @Test func presetsStoreSafeOptions() {

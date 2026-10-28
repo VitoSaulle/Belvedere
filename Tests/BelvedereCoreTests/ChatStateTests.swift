@@ -21,6 +21,13 @@ import Testing
         }.first)
     }
 
+    @Test func resumedSessionIsKnownBeforeTheFirstTurn() {
+        let state = ChatState(resuming: "abc", folder: "/tmp/progetto")
+        let snapshot = state.snapshot(launchedAt: now)
+        #expect(snapshot?.id == "abc")
+        #expect(snapshot?.cwd == "/tmp/progetto")
+    }
+
     @Test func allowFlowBuildsConversation() {
         let state = replay("stream-allow.jsonl")
         #expect(state.items.contains { if case .tool(_, "Bash", _, _, _) = $0 { true } else { false } })

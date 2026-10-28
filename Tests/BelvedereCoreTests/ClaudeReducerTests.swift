@@ -49,6 +49,17 @@ import Testing
         #expect(reduced(all).snapshot.status == .done)
     }
 
+    @Test func localCommandDoesNotLeaveTheSessionWorking() {
+        let command = Data(#"{"type":"user","message":{"role":"user","content":"<command-name>/context</command-name>\n<command-message>context</command-message>"},"timestamp":"2026-10-28T11:00:00Z"}"#.utf8)
+        let output = Data(#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>ok</local-command-stdout>"},"timestamp":"2026-10-28T11:00:01Z"}"#.utf8)
+        #expect(reduced(all + [command, output]).snapshot.status == .done)
+    }
+
+    @Test func interruptionEndsTheTurn() {
+        let line = Data(#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]},"timestamp":"2026-10-28T11:00:00Z"}"#.utf8)
+        #expect(reduced(all + [line]).snapshot.status == .idle)
+    }
+
     @Test func ignoresGarbage() {
         var r = reduced(all)
         let before = r.snapshot

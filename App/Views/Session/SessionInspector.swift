@@ -6,7 +6,8 @@ struct SessionInspector: View {
     let sessionID: String
 
     var body: some View {
-        if let s = model.session(sessionID) {
+        let host = model.host(for: sessionID)
+        if let s = model.session(host?.state.sessionID ?? sessionID) ?? host?.state.snapshot(launchedAt: host?.launchedAt) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Panel(title: nil) {
@@ -32,8 +33,28 @@ struct SessionInspector: View {
                         row("Cache letta", Fmt.tokens(s.tokens.cacheRead))
                         row("Costo stimato", s.costUSD.map(Fmt.usd) ?? "—")
                         row("Durata", duration(s))
-                        row("Origine", s.origin?.appName ?? "sconosciuta")
+                        row("Origine", s.origin?.appName ?? (model.launchedIDs.contains(s.id) ? "Belvedere" : "sconosciuta"))
                         if let model = s.model { row("Modello", ModelInfo.displayName(model)) }
+                    }
+
+                    if let host, !host.state.mcpServers.isEmpty || host.state.permissionMode != nil {
+                        Panel(title: "Server MCP") {
+                            if host.state.mcpServers.isEmpty {
+                                Text("Nessuno").font(.system(size: 12)).foregroundStyle(.secondary)
+                            }
+                            ForEach(host.state.mcpServers, id: \.name) { server in
+                                HStack(spacing: 8) {
+                                    Circle().fill(Self.color(server.status)).frame(width: 7, height: 7)
+                                    Text(server.name).font(.system(size: 12.5)).lineLimit(1)
+                                    Spacer()
+                                    Text(Self.label(server.status)).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                                }
+                            }
+                            if let mode = host.state.permissionMode {
+                                Divider().opacity(0.4)
+                                row("Permessi", Self.modeLabel(mode, skip: host.options.permission == .skip))
+                            }
+                        }
                     }
 
                     if !s.toolCounts.isEmpty {
@@ -66,6 +87,37 @@ struct SessionInspector: View {
                 }
                 .padding(16)
             }
+        }
+    }
+
+    static func color(_ status: String) -> Color {
+        switch status {
+        case "connected": Theme.done
+        case "failed": Theme.danger
+        case "pending": Theme.waiting
+        default: Theme.idle
+        }
+    }
+
+    static func label(_ status: String) -> String {
+        switch status {
+        case "connected": "connesso"
+        case "failed": "errore"
+        case "pending": "in avvio"
+        case "needs-auth": "da autorizzare"
+        case "disabled": "spento"
+        default: status
+        }
+    }
+
+    static func modeLabel(_ mode: String, skip: Bool) -> String {
+        if skip { return PermissionChoice.skip.label }
+        switch mode {
+        case "default": return PermissionChoice.ask.label
+        case "acceptEdits": return PermissionChoice.acceptEdits.label
+        case "auto": return PermissionChoice.auto.label
+        case "plan": return PermissionChoice.plan.label
+        default: return mode
         }
     }
 

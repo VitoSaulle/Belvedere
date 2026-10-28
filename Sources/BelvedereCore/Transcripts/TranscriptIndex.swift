@@ -61,8 +61,11 @@ public actor TranscriptIndex {
         var parentSessionID: String?
     }
 
+    /// Da aumentare quando cambia il modo in cui i riduttori leggono i log: la cache vecchia si ricostruisce.
+    static let cacheVersion = 3
+
     struct Cache: Codable {
-        var version = 1
+        var version = TranscriptIndex.cacheVersion
         var entries: [String: Entry]
         var buckets: [String: UsageBucket]
     }
@@ -76,7 +79,7 @@ public actor TranscriptIndex {
         self.roots = roots
         self.cacheURL = cacheURL
         if let data = try? Data(contentsOf: cacheURL),
-           let cache = try? JSONDecoder().decode(Cache.self, from: data), cache.version == 1 {
+           let cache = try? JSONDecoder().decode(Cache.self, from: data), cache.version == Self.cacheVersion {
             entries = cache.entries
             bucketTable = cache.buckets
         }

@@ -89,8 +89,16 @@ public struct ClaudeReducer: TranscriptReducer {
     }
 
     private mutating func consumeUser(_ obj: [String: Any]) {
-        guard obj["message"] is [String: Any] else { return }
+        guard let message = obj["message"] as? [String: Any] else { return }
         _ = noteCommon(obj)
+        // I comandi locali (`/context`, `/cost`…) non aprono un turno: nessun assistant chiuderebbe lo stato.
+        if let text = message["content"] as? String,
+           text.hasPrefix("<command-name>") || text.hasPrefix("<local-command-") { return }
+        let blocks = message["content"] as? [[String: Any]] ?? []
+        if blocks.contains(where: { ($0["text"] as? String)?.hasPrefix("[Request interrupted by user") == true }) {
+            snapshot.status = .idle
+            return
+        }
         snapshot.status = .working
     }
 

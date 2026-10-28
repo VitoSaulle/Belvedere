@@ -51,6 +51,8 @@ final class AppModel {
     /// Foglio «Nuova sessione», con la cartella proposta.
     var showNewSession = false
     var newSessionFolder: String?
+    /// Sessioni passate al terminale da questa esecuzione: osservate, così la vista si aggiorna subito.
+    private(set) var handedOff: Set<String> = []
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
@@ -131,7 +133,10 @@ final class AppModel {
         // `open Belvedere.app --args -BelvedereOpenSession <id>` apre direttamente una sessione.
         if let id = UserDefaults.standard.string(forKey: "BelvedereOpenSession") { route = .session(id) }
         if UserDefaults.standard.bool(forKey: "BelvedereOpenStats") { route = .stats }
-        if UserDefaults.standard.bool(forKey: "BelvedereNewSession") { showNewSession = true }
+        if UserDefaults.standard.bool(forKey: "BelvedereNewSession") {
+            newSessionFolder = UserDefaults.standard.string(forKey: "BelvedereNewSessionFolder")
+            showNewSession = true
+        }
         indexingProgress = 0
         let update = await index.refreshAll { [weak self] progress in
             Task { @MainActor in self?.indexingProgress = progress }
@@ -285,19 +290,36 @@ final class AppModel {
         guard s.agent == .claude, !s.cwd.isEmpty, !isHosted(s.id),
               s.status != .working, s.status != .waiting else { return false }
         if let pid = s.origin?.pid, s.origin?.appName != "Belvedere", kill(pid, 0) == 0 { return false }
-        return true
+        // Passata al terminale: finché quel processo vive, anche prima dei suoi hook, la sessione è sua.
+        let pidFile = Self.handoffPID(s.id)
+        // Appena passata il PID può non essere ancora scritto: intanto vale come occupata.
+        if handedOff.contains(s.id), !FileManager.default.fileExists(atPath: pidFile.path) { return false }
+        return !TerminalHandoff.isRunning(pidFile: pidFile)
+    }
+
+    private static func handoffPID(_ id: String) -> URL {
+        Belvedere.supportDirectory.appendingPathComponent("handoff/\(id).pid")
     }
 
     /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume`.
     func openInTerminal(_ sessionID: String) async {
         let host = host(for: sessionID)
-        await host?.stop()
-        guard let s = session(sessionID) ?? host?.state.snapshot(launchedAt: host?.launchedAt),
+        // Senza id (nessun messaggio ancora inviato) non c'è niente da riprendere nel terminale.
+        guard let s = host?.state.snapshot(launchedAt: host?.launchedAt) ?? session(sessionID),
               let binary = host?.binary ?? HostedSession(options: LaunchOptions(folder: "/")).binary else { return }
+        await host?.stop()
+        // Da qui la sessione è del terminale: Belvedere la osserva soltanto.
+        if let host {
+            hostedSessions.removeAll { $0 === host }
+            route = .session(s.id)
+        }
         let folder = Belvedere.supportDirectory.appendingPathComponent("handoff")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let url = folder.appendingPathComponent("\(s.id).command")
-        let script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary)
+        let script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
+                                            pidFile: Self.handoffPID(s.id).path)
+        try? FileManager.default.removeItem(at: Self.handoffPID(s.id))
+        handedOff.insert(s.id)
         do {
             try script.write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)

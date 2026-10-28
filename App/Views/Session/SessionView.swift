@@ -6,9 +6,17 @@ struct SessionView: View {
     let sessionID: String
 
     var body: some View {
-        if let session = model.session(sessionID) {
+        let host = model.host(for: sessionID)
+        if let host, let session = model.session(host.state.sessionID ?? sessionID) ?? placeholder(host) {
             VStack(spacing: 0) {
-                SessionHeader(session: session)
+                SessionHeader(session: session, host: host)
+                Divider().opacity(0.4)
+                HostedTranscript(host: host)
+                Composer(host: host, sessionID: session.id)
+            }
+        } else if let session = model.session(sessionID) {
+            VStack(spacing: 0) {
+                SessionHeader(session: session, host: nil)
                 Divider().opacity(0.4)
                 TranscriptList(session: session)
                 ReadOnlyBar(session: session)
@@ -20,9 +28,21 @@ struct SessionView: View {
     }
 }
 
+/// Sessione appena lanciata: Claude non ha ancora comunicato il suo id.
+@MainActor private func placeholder(_ host: HostedSession) -> SessionSnapshot? {
+    if let snapshot = host.state.snapshot(launchedAt: host.launchedAt) { return snapshot }
+    var s = SessionSnapshot(id: AppModel.provisionalPrefix + host.id.uuidString, agent: .claude, cwd: host.options.folder)
+    s.status = host.isRunning ? .working : .idle
+    s.model = host.options.local?.id ?? host.options.model
+    s.isLocalModel = host.options.local != nil
+    s.startedAt = host.launchedAt
+    return s
+}
+
 struct SessionHeader: View {
     @Environment(AppModel.self) private var model
     let session: SessionSnapshot
+    let host: HostedSession?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -56,14 +76,18 @@ struct SessionHeader: View {
             if let name = session.model {
                 Text(ModelInfo.displayName(name)).font(.system(size: 12, weight: .medium))
             }
-            Tag(text: session.isLocalModel ? "Locale" : "Cloud", tint: session.isLocalModel ? Theme.local : nil)
+            if host?.options.permission == .skip {
+                Tag(text: "Permessi saltati", tint: Theme.danger)
+            }
+            Tag(text: session.isLocalModel || host?.options.local != nil ? "Locale" : "Cloud",
+                tint: session.isLocalModel || host?.options.local != nil ? Theme.local : nil)
         }
         .padding(.horizontal, 16)
         .frame(height: 56)
     }
 }
 
-/// Barra in basso al posto del campo di testo: in questa fase la sessione si osserva soltanto.
+/// Barra in basso per le sessioni che Belvedere osserva soltanto; se la sessione è ferma si può riprendere qui.
 struct ReadOnlyBar: View {
     @Environment(AppModel.self) private var model
     let session: SessionSnapshot
@@ -71,21 +95,34 @@ struct ReadOnlyBar: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "eye").foregroundStyle(.secondary)
-            Text("Sola lettura in questa fase").foregroundStyle(.secondary)
+            Text(model.canResumeHere(session) ? "Sessione ferma" : "Solo osservazione").foregroundStyle(.secondary)
             Spacer()
+            if model.canResumeHere(session) {
+                Button {
+                    model.resume(session.id)
+                } label: {
+                    Label("Riprendi in Belvedere", systemImage: "play.fill")
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
+                .help("Riprende la conversazione qui con claude --resume")
+            }
             if let fraction = session.contextFraction {
                 Text("ctx \(Fmt.percent(fraction))").foregroundStyle(.secondary).monospacedDigit()
             }
-            Button {
-                model.activateOrigin(of: session.id)
-            } label: {
-                Label(session.origin.map { "Vai a \($0.appName)" } ?? "Vai al terminale", systemImage: "arrow.up.forward.app")
+            // Una sessione partita da Belvedere non ha un'altra app a cui tornare.
+            if session.origin?.appName != "Belvedere" {
+                Button {
+                    model.activateOrigin(of: session.id)
+                } label: {
+                    Label(session.origin.map { "Vai a \($0.appName)" } ?? "Vai al terminale", systemImage: "arrow.up.forward.app")
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .tint(Theme.accent)
+                .disabled(session.origin == nil)
+                .help(session.origin == nil ? "Origine sconosciuta: la sessione è partita prima di Belvedere" : "")
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .tint(Theme.accent)
-            .disabled(session.origin == nil)
-            .help(session.origin == nil ? "Origine sconosciuta: la sessione è partita prima di Belvedere" : "")
         }
         .font(.system(size: 12.5))
         .padding(.horizontal, 14)
