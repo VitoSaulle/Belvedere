@@ -10,6 +10,8 @@ public struct ClaudeReducer: TranscriptReducer {
     private var inheritedContext = false
     /// Somma di token × listino messaggio per messaggio, ognuno col suo modello; `nil` se nessuno ha un listino.
     private var estimatedCost: Double?
+    /// Modifiche ai file in attesa del risultato dello strumento: una scrittura negata non tocca il disco.
+    private var pendingEdits: [String: FileChange] = [:]
 
     public init(transcriptPath: String) {
         let id = ((transcriptPath as NSString).lastPathComponent as NSString).deletingPathExtension
@@ -106,6 +108,10 @@ public struct ClaudeReducer: TranscriptReducer {
         if let text = message["content"] as? String,
            text.hasPrefix("<command-name>") || text.hasPrefix("<local-command-") { return }
         let blocks = message["content"] as? [[String: Any]] ?? []
+        for block in blocks where block["type"] as? String == "tool_result" {
+            guard let id = block["tool_use_id"] as? String, let edit = pendingEdits.removeValue(forKey: id) else { continue }
+            if block["is_error"] as? Bool != true { applyFileChange(edit) }
+        }
         if blocks.contains(where: { ($0["text"] as? String)?.hasPrefix("[Request interrupted by user") == true }) {
             snapshot.status = .idle
             return
@@ -119,10 +125,12 @@ public struct ClaudeReducer: TranscriptReducer {
         let summary = Self.toolSummary(name: name, input: input)
         snapshot.lastText = summary.isEmpty ? name : "\(name): \(summary)"
 
-        if let toolID = block["id"] as? String, !seenTools.insert(toolID) { return }
+        let toolID = block["id"] as? String
+        if let toolID, !seenTools.insert(toolID) { return }
         snapshot.toolCounts[name, default: 0] += 1
         addUsage(date: date, tokens: .zero, tool: name)
-        recordFileChange(name: name, input: input)
+        guard let edit = Self.fileChange(name: name, input: input) else { return }
+        if let toolID { pendingEdits[toolID] = edit } else { applyFileChange(edit) }
     }
 
     /// Campi comuni: cartella, branch, orari. Restituisce l'orario della riga.
@@ -152,8 +160,8 @@ public struct ClaudeReducer: TranscriptReducer {
         pending[key] = bucket
     }
 
-    private mutating func recordFileChange(name: String, input: [String: Any]) {
-        guard let path = input["file_path"] as? String else { return }
+    static func fileChange(name: String, input: [String: Any]) -> FileChange? {
+        guard let path = input["file_path"] as? String else { return nil }
         var added = 0, removed = 0
         switch name {
         case "Edit":
@@ -167,13 +175,17 @@ public struct ClaudeReducer: TranscriptReducer {
         case "Write":
             added = Self.lineCount(input["content"])
         default:
-            return
+            return nil
         }
-        if let i = snapshot.filesChanged.firstIndex(where: { $0.path == path }) {
-            snapshot.filesChanged[i].added += added
-            snapshot.filesChanged[i].removed += removed
+        return FileChange(path: path, added: added, removed: removed)
+    }
+
+    private mutating func applyFileChange(_ edit: FileChange) {
+        if let i = snapshot.filesChanged.firstIndex(where: { $0.path == edit.path }) {
+            snapshot.filesChanged[i].added += edit.added
+            snapshot.filesChanged[i].removed += edit.removed
         } else {
-            snapshot.filesChanged.append(FileChange(path: path, added: added, removed: removed))
+            snapshot.filesChanged.append(edit)
         }
     }
 

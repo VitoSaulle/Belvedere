@@ -178,6 +178,10 @@ struct NewSessionSheet: View {
                     .buttonStyle(.plain)
                 }
             }
+            // Un solo modello caricato: è quello, senza un clic in più.
+            .task(id: loaded.map(\.id)) {
+                if localModel == nil, loaded.count == 1 { localModel = loaded[0] }
+            }
             if let warning = LaunchAdvice.contextWarning(localModel?.contextLength, agent: agent) {
                 Text(warning).font(.callout).foregroundStyle(.secondary)
             }

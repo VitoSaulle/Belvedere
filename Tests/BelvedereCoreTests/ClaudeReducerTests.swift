@@ -63,6 +63,28 @@ import Testing
         #expect(s.filesChanged.first?.removed == 1)
     }
 
+    /// Un file conta come modificato solo quando lo strumento è andato a buon fine:
+    /// una scrittura negata (o interrotta) non ha toccato il disco.
+    @Test func deniedWriteIsNotAChangedFile() {
+        let lines = [
+            #"{"type":"assistant","timestamp":"2026-10-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"/p/nota.txt","content":"ciao"}},{"type":"tool_use","id":"w2","name":"Write","input":{"file_path":"/p/ok.txt","content":"a\nb"}}]}}"#,
+            #"{"type":"user","timestamp":"2026-10-28T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"w1","is_error":true,"content":"The user doesn't want to proceed with this tool use."},{"type":"tool_result","tool_use_id":"w2","content":"File created"}]}}"#,
+        ].map { Data($0.utf8) }
+        let s = reduced(lines).snapshot
+        #expect(s.filesChanged == [FileChange(path: "/p/ok.txt", added: 2, removed: 0)])
+        #expect(s.toolCounts == ["Write": 2])
+    }
+
+    /// Lo strumento in attesa di risposta sopravvive alla cache: il risultato può arrivare dopo.
+    @Test func pendingEditSurvivesEncoding() throws {
+        let use = Data(#"{"type":"assistant","timestamp":"2026-10-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"/p/a.txt","content":"x"}}]}}"#.utf8)
+        let result = Data(#"{"type":"user","timestamp":"2026-10-28T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"w1","content":"ok"}]}}"#.utf8)
+        var r = try JSONDecoder().decode(ClaudeReducer.self, from: JSONEncoder().encode(reduced([use])))
+        #expect(r.snapshot.filesChanged.isEmpty)
+        r.consume(result)
+        #expect(r.snapshot.filesChanged.map(\.path) == ["/p/a.txt"])
+    }
+
     @Test func statusFromLastLine() {
         let midway = reduced(Array(all.prefix(6))).snapshot
         #expect(midway.status == .working)
