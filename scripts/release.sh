@@ -1,6 +1,8 @@
 #!/bin/sh
 # Build da distribuire fuori dallo Store: universale, firmata Developer ID, notarizzata da Apple, in un DMG.
-# Firma e notarizzazione passano dall'account del team configurato in Xcode: nessuna password qui.
+# Firma e notarizzazione: sul Mac passano dall'account del team configurato in Xcode; su GitHub Actions da una
+# chiave API di App Store Connect (ASC_KEY_PATH, ASC_KEY_ID, ASC_ISSUER_ID). Nessuna password nello script.
+# VERSION (es. 0.2.0) e BUILD_NUMBER, se presenti, finiscono nel bundle.
 set -e
 cd "$(dirname "$0")/.."
 TEAM=94BHT7B4R9
@@ -11,6 +13,13 @@ mkdir -p "$OUT" .superpowers
 : > "$LOG"
 
 step() { echo "· $1"; }
+AUTH=""
+if [ -n "$ASC_KEY_PATH" ]; then
+  AUTH="-authenticationKeyPath $ASC_KEY_PATH -authenticationKeyID $ASC_KEY_ID -authenticationKeyIssuerID $ASC_ISSUER_ID"
+fi
+VERSIONING=""
+[ -n "$VERSION" ] && VERSIONING="MARKETING_VERSION=$VERSION"
+[ -n "$BUILD_NUMBER" ] && VERSIONING="$VERSIONING CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
 fail() { tail -30 "$LOG" | grep -E "error|Error|failed" | head -15; echo "RELEASE FALLITA: $1 (log in $LOG)"; exit 1; }
 
 step "progetto e helper universali"
@@ -22,8 +31,8 @@ HELPERS=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
 
 step "archivio Release"
 xcodebuild -project Belvedere.xcodeproj -scheme Belvedere -configuration Release \
-  -archivePath "$OUT/Belvedere.xcarchive" -allowProvisioningUpdates \
-  HELPERS_DIR="$HELPERS" archive >> "$LOG" 2>&1 || fail "archivio"
+  -archivePath "$OUT/Belvedere.xcarchive" -allowProvisioningUpdates $AUTH \
+  HELPERS_DIR="$HELPERS" $VERSIONING archive >> "$LOG" 2>&1 || fail "archivio"
 
 cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -40,11 +49,11 @@ PLIST
 
 step "firma Developer ID e invio alla notarizzazione"
 xcodebuild -exportArchive -archivePath "$OUT/Belvedere.xcarchive" -exportOptionsPlist "$OUT/ExportOptions.plist" \
-  -exportPath "$OUT/upload" -allowProvisioningUpdates >> "$LOG" 2>&1 || fail "esportazione"
+ -exportPath "$OUT/upload" -allowProvisioningUpdates $AUTH >> "$LOG" 2>&1 || fail "esportazione"
 
 step "attesa della notarizzazione (di solito pochi minuti)"
 i=0
-until xcodebuild -exportNotarizedApp -archivePath "$OUT/Belvedere.xcarchive" -exportPath "$OUT/app" >> "$LOG" 2>&1; do
+until xcodebuild -exportNotarizedApp -archivePath "$OUT/Belvedere.xcarchive" -exportPath "$OUT/app" $AUTH >> "$LOG" 2>&1; do
   i=$((i + 1))
   [ $i -ge 60 ] && fail "notarizzazione non arrivata in 30 minuti"
   sleep 30

@@ -1,0 +1,59 @@
+# Un tag vX.Y.Z su main: build universale, firma Developer ID, notarizzazione, DMG allegato alla Release.
+# Segreti del repo (li imposta il proprietario, non compaiono mai nei log):
+#   ASC_KEY_ID, ASC_ISSUER_ID  – chiave API di App Store Connect, ruolo Admin
+#   ASC_KEY_P8                 – contenuto del file AuthKey_<id>.p8
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Il tag è su main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: XcodeGen
+        run: brew install xcodegen
+      - name: Test
+        run: scripts/t.sh
+      - name: Chiave API
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          umask 077
+          printf '%s\n' "$ASC_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+      - name: Firma, notarizzazione e DMG
+        env:
+          ASC_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          VERSION: ${{ github.ref_name }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          export VERSION="${VERSION#v}"
+          scripts/release.sh
+      - name: Log in caso di errore
+        if: failure()
+        run: tail -60 .superpowers/release-last.log | grep -v -i -E "authenticationKey|AuthKey" || true
+      - name: Release su GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/release/Belvedere-*.dmg \
+            --title "Belvedere ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag
+      - name: Via la chiave
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"

@@ -32,6 +32,9 @@ targets:
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         # Cartella degli helper compilati con SwiftPM (release.sh la passa per la build universale).
         HELPERS_DIR: $(SRCROOT)/.build/release
+        # Le release le sovrascrivono: la versione viene dal tag (v0.2.0 → 0.2.0), la build dal numero dell'esecuzione.
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
       configs:
         # Distribuzione fuori dallo Store: firma del team, hardened runtime per la notarizzazione.
         Release:
