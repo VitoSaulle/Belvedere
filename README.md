@@ -47,7 +47,7 @@ scripts/build-app.sh   # build di sviluppo, firma ad-hoc
 scripts/t.sh           # test (Swift Testing)
 ```
 
-L'app compilata è in `build/DerivedData/Build/Products/Debug/Belvedere.app`. La logica è nel pacchetto Swift `BelvedereCore` (`Sources/`), l'interfaccia SwiftUI in `App/`. Il design e le scoperte di ogni fase sono in [`docs/superpowers/specs`](docs/superpowers/specs/2026-10-28-belvedere-design.md).
+L'app compilata è in `build/DerivedData/Build/Products/Debug/Belvedere.app`. La logica è nel pacchetto Swift `BelvedereCore` (`Sources/`), l'interfaccia SwiftUI in `App/`.
 
 ## Contribuire
 
