@@ -1,4 +1,5 @@
 import BelvedereCore
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
@@ -6,6 +7,8 @@ struct SettingsView: View {
     @AppStorage(NotchController.enabledKey) private var notchEnabled = true
     @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
     @State private var error: String?
+    @State private var launchAtLogin = [.enabled, .requiresApproval].contains(SMAppService.mainApp.status)
+    @State private var loginError: String?
 
     var body: some View {
         Form {
@@ -57,6 +60,19 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Section("Avvio") {
+                Toggle("Apri Belvedere al login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, on in setLaunchAtLogin(on) }
+                if SMAppService.mainApp.status == .requiresApproval {
+                    Text("macOS chiede di approvarlo in Impostazioni di Sistema › Generali › Elementi login.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                if let loginError {
+                    Text(loginError).font(.callout).foregroundStyle(Theme.danger)
+                }
+            }
+
             Section("Aspetto") {
                 Toggle("Mostra nel notch", isOn: $notchEnabled)
                 Picker("Tema", selection: $appearance) {
@@ -106,6 +122,18 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 520, height: 640)
+    }
+
+    private func setLaunchAtLogin(_ on: Bool) {
+        do {
+            if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            loginError = nil
+        } catch {
+            loginError = "Non riuscito: \(error.localizedDescription)"
+        }
+        // Lo stato vero, anche se la richiesta non è andata a buon fine.
+        let enabled = [.enabled, .requiresApproval].contains(SMAppService.mainApp.status)
+        if launchAtLogin != enabled { launchAtLogin = enabled }
     }
 
     private func run(_ action: () throws -> Void) {
