@@ -1,0 +1,12 @@
+<!-- Glifo monocromatico della menu bar: cupola, colonne e basamento. Si usa come template. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="290 250 444 500">
+<rect x="506" y="292" width="12" height="48" rx="6" fill="#000"/>
+<circle cx="512" cy="290" r="22" fill="#000"/>
+<path d="M336 478a176 146 0 0 1 352 0Z" fill="#000"/>
+<rect x="320" y="474" width="384" height="34" rx="14" fill="#000"/>
+<rect x="356" y="500" width="44" height="190" rx="10" fill="#000"/>
+<rect x="446" y="500" width="44" height="190" rx="10" fill="#000"/>
+<rect x="534" y="500" width="44" height="190" rx="10" fill="#000"/>
+<rect x="624" y="500" width="44" height="190" rx="10" fill="#000"/>
+<rect x="306" y="686" width="412" height="52" rx="16" fill="#000"/>
+</svg>

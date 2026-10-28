@@ -8,6 +8,18 @@ public enum PermissionPolicy: Sendable, Equatable {
 
     /// Dallo spike: il timeout del hook HTTP è 600 s, Belvedere rinuncia 10 s prima.
     public static let `default` = PermissionPolicy.hold(timeoutSeconds: 590)
+
+    /// Forma salvata nelle preferenze: "observe" oppure "hold".
+    public var storageValue: String {
+        switch self {
+        case .observeOnly: "observe"
+        case .hold: "hold"
+        }
+    }
+
+    public init(storageValue: String?) {
+        self = storageValue == "observe" ? .observeOnly : .default
+    }
 }
 
 public enum PermissionDecision: Sendable, Equatable {
@@ -17,7 +29,7 @@ public enum PermissionDecision: Sendable, Equatable {
 
 /// Accoppia le richieste di permesso in arrivo dai hook con le risposte date nell'interfaccia.
 public actor PermissionBroker {
-    private let policy: PermissionPolicy
+    private var policy: PermissionPolicy
     private var waiters: [String: CheckedContinuation<PermissionDecision?, Never>] = [:]
 
     public init(policy: PermissionPolicy) {
@@ -35,6 +47,11 @@ public actor PermissionBroker {
                 await self?.finish(requestID, with: nil)
             }
         }
+    }
+
+    /// Cambia la politica per le richieste future; quelle in attesa restano come sono.
+    public func setPolicy(_ policy: PermissionPolicy) {
+        self.policy = policy
     }
 
     public func resolve(requestID: String, with decision: PermissionDecision) {

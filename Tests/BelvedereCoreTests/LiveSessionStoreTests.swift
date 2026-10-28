@@ -30,6 +30,15 @@ import Testing
         #expect(store.sessions.first?.pending == nil)
     }
 
+    @Test func orphanPendingExpires() {
+        var store = LiveSessionStore()
+        store.apply(hook("PermissionRequest", #","tool_use_id":"t1""#), origin: nil)
+        #expect(store.waitingCount == 1)
+        store.tick(now: Date().addingTimeInterval(11 * 60))
+        #expect(store.waitingCount == 0)
+        #expect(store.sessions.first?.pending == nil)
+    }
+
     @Test func recentHookBeatsLogs() {
         var store = LiveSessionStore()
         store.apply(hook("Notification", #","notification_type":"permission_prompt""#), origin: nil)

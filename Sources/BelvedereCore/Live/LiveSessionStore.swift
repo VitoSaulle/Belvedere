@@ -134,8 +134,17 @@ public struct LiveSessionStore: Sendable {
             if let status = hook.status, now.timeIntervalSince(hook.statusAt) < Self.hookPrecedence {
                 s.status = status
             }
-            s.pending = hook.pending
-            if hook.pending != nil { s.status = .waiting }
+            // Oltre il timeout del hook nessuno può più rispondere da qui: se il processo è morto
+            // senza altri eventi, la richiesta resterebbe aperta per sempre.
+            s.pending = nil
+            if let pending = hook.pending {
+                if now.timeIntervalSince(pending.receivedAt) < Self.hookPrecedence {
+                    s.pending = pending
+                    s.status = .waiting
+                } else if s.status == .waiting {
+                    s.status = .idle
+                }
+            }
             if hook.ended { s.status = .ended; s.pending = nil }
         }
         if let line = statusLines[id], line.at >= (logs[id]?.lastActivity ?? .distantPast) {

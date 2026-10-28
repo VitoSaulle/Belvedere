@@ -35,6 +35,22 @@ import Testing
         #expect(await b == nil)
     }
 
+    @Test func policyCanChangeAtRuntime() async {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        await broker.setPolicy(.observeOnly)
+        let clock = ContinuousClock()
+        var decision: PermissionDecision? = .allow
+        let elapsed = await clock.measure { decision = await broker.decision(for: "r") }
+        #expect(decision == nil)
+        #expect(elapsed < .milliseconds(100))
+    }
+
+    @Test func policyStorageRoundTrip() {
+        #expect(PermissionPolicy(storageValue: PermissionPolicy.observeOnly.storageValue) == .observeOnly)
+        #expect(PermissionPolicy(storageValue: PermissionPolicy.default.storageValue) == .default)
+        #expect(PermissionPolicy(storageValue: nil) == .default)
+    }
+
     @Test func defaultPolicyFromSpike() {
         #expect(PermissionPolicy.default == .hold(timeoutSeconds: 590))
     }

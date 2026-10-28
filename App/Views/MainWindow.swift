@@ -24,6 +24,9 @@ struct MainWindow: View {
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         .frame(minWidth: 980, minHeight: 620)
+        .sheet(isPresented: $model.showWelcome) {
+            WelcomeSheet()
+        }
     }
 
     @ViewBuilder private var detail: some View {

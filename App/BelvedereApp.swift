@@ -21,6 +21,11 @@ struct BelvedereApp: App {
                     .keyboardShortcut("s", modifiers: [.command, .option])
             }
         }
+        Settings {
+            SettingsView()
+                .environment(delegate.model)
+        }
+
         // Anteprima del pannello della menu bar in una finestra: `--args -BelvedereShowPanel YES`.
         Window("Pannello", id: "panel-preview") {
             MenuBarPanel()

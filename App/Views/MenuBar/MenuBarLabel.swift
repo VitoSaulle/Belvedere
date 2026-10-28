@@ -13,9 +13,9 @@ struct MenuBarLabel: View {
 
     /// Disegnata al momento dell'uso, così segue l'aspetto chiaro o scuro della menu bar.
     static func image(active: Int, waiting: Bool) -> NSImage {
-        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        let symbol = NSImage(systemSymbolName: "building.columns.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(symbolConfig) ?? NSImage()
+        // Glifo «Cupola» generato da design/icon/cupola-glyph.svg (scripts/render-icon.sh).
+        let symbol = NSImage(named: "MenuBarGlyph") ?? NSImage()
+        symbol.size = NSSize(width: 16, height: 16)
         let text = active > 0 ? "\(active)" : ""
         let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         let textWidth = text.isEmpty ? 0 : (text as NSString).size(withAttributes: [.font: font]).width + 4

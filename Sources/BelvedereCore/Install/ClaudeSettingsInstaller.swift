@@ -149,9 +149,14 @@ public struct SettingsFile {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = "yyyyMMdd-HHmmss"
-            let target = url.deletingLastPathComponent()
-                .appendingPathComponent("\(url.lastPathComponent).belvedere-\(formatter.string(from: now)).bak")
-            try? fm.removeItem(at: target)
+            let stem = "\(url.lastPathComponent).belvedere-\(formatter.string(from: now))"
+            // Mai sovrascrivere un backup esistente: potrebbe essere l'unica copia dell'originale.
+            var target = url.deletingLastPathComponent().appendingPathComponent("\(stem).bak")
+            var n = 1
+            while fm.fileExists(atPath: target.path) {
+                target = url.deletingLastPathComponent().appendingPathComponent("\(stem)-\(n).bak")
+                n += 1
+            }
             try fm.copyItem(at: url, to: target)
             backup = target
         } else {

@@ -87,6 +87,18 @@ import Testing
         #expect(try SettingsFile(url: tmp.url.appendingPathComponent("none.json")).read().isEmpty)
     }
 
+    @Test func backupsInSameSecondDoNotOverwrite() throws {
+        let tmp = TempDir()
+        let url = tmp.file("settings.json", #"{"v":1}"#)
+        let file = SettingsFile(url: url)
+        let now = Date()
+        let first = try #require(try file.writeWithBackup(["v": 2], now: now))
+        let second = try #require(try file.writeWithBackup(["v": 3], now: now))
+        #expect(first != second)
+        #expect(try String(contentsOf: first, encoding: .utf8) == #"{"v":1}"#)
+        #expect(try SettingsFile(url: second).read()["v"] as? Int == 2)
+    }
+
     @Test func installsHelpersFromBundle() throws {
         let tmp = TempDir()
         _ = tmp.file("Fake.app/Contents/Helpers/belvedere-hook", "#!/bin/sh\n")

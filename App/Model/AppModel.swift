@@ -13,7 +13,11 @@ final class AppModel {
     var hooksInstalled = false
     var serverError: String?
     private(set) var buckets: [UsageBucket] = []
-    let policy: PermissionPolicy
+    private(set) var policy: PermissionPolicy
+    /// Backup di `~/.claude/settings.json` scritto dall'ultimo collegamento o scollegamento.
+    private(set) var lastBackup: String? = UserDefaults.standard.string(forKey: "lastSettingsBackup")
+    /// Foglio di benvenuto (primo avvio, o «Collega…» dalla Plancia).
+    var showWelcome = false
 
     /// Navigazione condivisa tra finestra, menu bar e scorciatoie.
     var route: Route = .plancia
@@ -32,7 +36,11 @@ final class AppModel {
     /// Il primo giro dell'indice non genera eventi: sarebbero centinaia di «nuova sessione».
     @ObservationIgnored private var feedReady = false
 
-    init(roots: TranscriptRoots = .default, policy: PermissionPolicy = .default) {
+    static let policyKey = "permissionPolicy"
+    static let welcomeKey = "welcomeShown"
+
+    init(roots: TranscriptRoots = .default,
+         policy: PermissionPolicy = PermissionPolicy(storageValue: UserDefaults.standard.string(forKey: AppModel.policyKey))) {
         self.roots = roots
         self.policy = policy
         index = TranscriptIndex(roots: roots, cacheURL: Belvedere.supportDirectory.appendingPathComponent("index.json"))
@@ -51,6 +59,7 @@ final class AppModel {
         started = true
         refreshHooksInstalled()
         startServer()
+        if !hooksInstalled && !UserDefaults.standard.bool(forKey: Self.welcomeKey) { showWelcome = true }
 
         let watcher = DirectoryWatcher(paths: [roots.claude, roots.codex]) { [weak self] paths in
             let relevant = paths.filter { $0.hasSuffix(".jsonl") }
@@ -91,6 +100,48 @@ final class AppModel {
 
     func refreshHooksInstalled() {
         hooksInstalled = (try? ClaudeSettingsInstaller.isInstalled(SettingsFile().read(), port: Belvedere.defaultPort)) ?? false
+    }
+
+    // MARK: - Collegamento a Claude Code
+
+    var watchedFolders: [URL] { [roots.claude, roots.codex] }
+
+    /// Copia gli eseguibili e aggiunge hook e status line a `~/.claude/settings.json`, con backup.
+    func connectClaude() throws {
+        let helpers = try ClaudeSettingsInstaller.installHelpers(from: .main)
+        let file = SettingsFile()
+        var timeout: Double?
+        if case .hold(let seconds) = PermissionPolicy.default { timeout = seconds }
+        let updated = ClaudeSettingsInstaller.install(into: try file.read(), helpers: helpers,
+                                                      port: Belvedere.defaultPort, permissionTimeout: timeout)
+        remember(backup: try file.writeWithBackup(updated))
+        refreshHooksInstalled()
+    }
+
+    /// Toglie solo le voci di Belvedere, con backup.
+    func disconnectClaude() throws {
+        let file = SettingsFile()
+        let restored = ClaudeSettingsInstaller.uninstall(from: try file.read(), port: Belvedere.defaultPort)
+        remember(backup: try file.writeWithBackup(restored))
+        refreshHooksInstalled()
+    }
+
+    func setPolicy(_ newPolicy: PermissionPolicy) {
+        policy = newPolicy
+        UserDefaults.standard.set(newPolicy.storageValue, forKey: Self.policyKey)
+        let broker = self.broker
+        Task { await broker.setPolicy(newPolicy) }
+    }
+
+    func dismissWelcome() {
+        showWelcome = false
+        UserDefaults.standard.set(true, forKey: Self.welcomeKey)
+    }
+
+    private func remember(backup: URL?) {
+        guard let backup else { return }
+        lastBackup = backup.path
+        UserDefaults.standard.set(backup.path, forKey: "lastSettingsBackup")
     }
 
     // MARK: - Azioni

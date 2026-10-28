@@ -30,6 +30,9 @@ struct PlanciaView: View {
                 if let progress = model.indexingProgress {
                     IndexingBar(progress: progress)
                 }
+                if !model.hooksInstalled && model.indexingProgress == nil {
+                    ConnectBanner()
+                }
                 if let error = model.serverError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
@@ -93,7 +96,7 @@ struct PlanciaView: View {
             }
             .padding(.vertical, 80)
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 290, maximum: 420), spacing: 14)], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 290, maximum: 420), spacing: 14, alignment: .top)], spacing: 14) {
                 ForEach(visible) { session in
                     SessionCard(session: session)
                 }

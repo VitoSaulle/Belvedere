@@ -67,7 +67,10 @@ struct NotchView: View {
             EmptyView()
         case .resting(let active):
             HStack {
-                Image(systemName: "building.columns.fill").font(.system(size: 12, weight: .semibold))
+                Image("MenuBarGlyph")
+                    .renderingMode(.template)
+                    .resizable()
+                    .frame(width: 14, height: 14)
                     .foregroundStyle(Self.warm)
                 Spacer(minLength: notch == 0 ? 8 : notch)
                 Text("\(active)").font(.system(size: 13, weight: .semibold)).monospacedDigit()
