@@ -1,0 +1,34 @@
+#!/usr/bin/expect -f
+# Uso: run.exp <mode>   mode = answer (rispondo nel terminale mentre il hook dorme) | wait (non rispondo)
+set mode [lindex $argv 0]
+set timeout 90
+set ev /tmp/belvedere-spike/events.log
+proc mark {msg} { global ev; set f [open $ev a]; puts $f "$msg [clock milliseconds]"; close $f }
+log_file -noappend /tmp/belvedere-spike/screen-$mode.log
+cd /tmp/belvedere-spike
+set stty_init "rows 40 cols 140"
+spawn -noecho env -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_SESSION_ATTENDED -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_EXECPATH TERM=xterm-256color claude --model haiku --permission-mode default
+expect {
+  -re {confirm} { sleep 1; send "\033\[B"; sleep 0.5; send "\r"; exp_continue }
+  -re {for shortcuts|Try "|bypass|accept edits|>\s*$} {}
+  timeout { mark "no-ready" }
+}
+sleep 2
+send -- "Esegui con il tool Bash esattamente questo comando e nient'altro: touch spike-ok"
+sleep 1
+send "\r"
+mark "prompt-sent"
+expect {
+  -re {Do you want to proceed|proceed\?} { mark "permission-dialog-visible" }
+  timeout { mark "no-dialog"; }
+}
+if {$mode eq "answer"} {
+  sleep 3
+  send "1"
+  mark "answered-in-terminal"
+}
+set t0 [clock seconds]
+while {![file exists /tmp/belvedere-spike/spike-ok] && [clock seconds] - $t0 < 60} { expect -timeout 1 -re {.+} {} }
+if {[file exists /tmp/belvedere-spike/spike-ok]} { mark "file-created" } else { mark "file-not-created" }
+send "\x03"; sleep 1; send "\x03"
+expect eof
