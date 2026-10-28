@@ -173,12 +173,18 @@ final class HostedSession: Identifiable {
         changed()
     }
 
+    /// Ferma il turno; le card aperte si negano, altrimenti il turno resterebbe ad aspettarle.
     func interrupt() {
         if codex != nil {
             withCodex { c, _ in c.interrupt() }
         } else {
+            for ask in state.asks {
+                write(StreamInput.decision(.deny(message: "Interrotto dall'utente in Belvedere"), for: ask.id))
+            }
             write(StreamInput.interrupt(requestID: UUID().uuidString))
         }
+        for ask in state.asks { state.answered(ask.id) }
+        changed()
     }
 
     func stop() async {

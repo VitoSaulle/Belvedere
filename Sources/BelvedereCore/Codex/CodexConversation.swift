@@ -65,12 +65,14 @@ public struct CodexConversation: Sendable {
     }
 
     public mutating func interrupt() -> [Data] {
+        // Le approvazioni aperte si negano: il turno non si ferma finché aspetta una risposta.
+        let declined = requests.keys.sorted().flatMap { answer($0, allow: false, always: false) }
         guard let threadID, let turnID else {
             // Solo se un turno sta per partire: da fermi non c'è niente da interrompere.
             if !queued.isEmpty || pending.values.contains(.turn) { interruptRequested = true }
-            return []
+            return declined
         }
-        return [request("turn/interrupt", ["threadId": .string(threadID), "turnId": .string(turnID)], purpose: .interrupt)]
+        return declined + [request("turn/interrupt", ["threadId": .string(threadID), "turnId": .string(turnID)], purpose: .interrupt)]
     }
 
     /// `/clear`: un thread nuovo nello stesso processo.

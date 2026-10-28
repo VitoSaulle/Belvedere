@@ -66,7 +66,7 @@ struct Composer: View {
             .buttonStyle(.plain)
             .fixedSize()
             .help("Altre azioni")
-            if host.state.status == .working {
+            if host.state.status == .working || host.state.status == .waiting {
                 Button { host.interrupt() } label: {
                     Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold))
                         .frame(width: 28, height: 28)

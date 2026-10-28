@@ -93,6 +93,19 @@ import Testing
         #expect(c.interrupt().isEmpty)
     }
 
+    /// «Ferma» con un'approvazione aperta: prima la si nega, poi si interrompe il turno.
+    @Test func interruptDeclinesPendingApprovals() {
+        var (c, state) = ready()
+        _ = c.receive(.turnStarted(turnID: "u1"), state: &state, now: now)
+        _ = c.receive(Self.message(#"{"method":"item/commandExecution/requestApproval","id":7,"params":{"command":"ls"}}"#), state: &state, now: now)
+        let out = c.interrupt().map(Self.object)
+        #expect(out.count == 2)
+        #expect(out[0]["id"] == .number(7))
+        #expect(out[0]["result"]?["decision"]?.stringValue == "decline")
+        #expect(out[1]["method"]?.stringValue == "turn/interrupt")
+        #expect(c.answer(state.asks[0].id, allow: true, always: false).isEmpty)
+    }
+
     @Test func commandApprovalRoundTrip() throws {
         var (c, state) = ready()
         let request = #"{"method":"item/commandExecution/requestApproval","id":0,"params":{"itemId":"c1","command":"/bin/zsh -c 'touch uno.txt'","cwd":"/p","proposedExecpolicyAmendment":["touch","uno.txt"]}}"#
