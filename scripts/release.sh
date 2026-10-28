@@ -27,6 +27,13 @@ REPO_URL=https://github.com/VitoSaulle/Belvedere
 SPM=build/spm
 fail() { tail -30 "$LOG" | grep -E "error|Error|failed" | head -15; echo "RELEASE FALLITA: $1 (log in $LOG)"; exit 1; }
 
+# Sul Mac: firma automatica (certificato del team in Xcode). Su GitHub Actions il certificato gestito nel cloud
+# non è usabile con una chiave API: SIGNING_STYLE=manual firma con il Developer ID importato nel portachiavi.
+SIGNING_STYLE=${SIGNING_STYLE:-automatic}
+SIGNING_CERT=""
+[ "$SIGNING_STYLE" = manual ] && SIGNING_CERT="
+  <key>signingCertificate</key><string>Developer ID Application</string>"
+
 step "progetto e helper universali"
 xcodegen generate --quiet
 for p in belvedere-hook belvedere-statusline; do
@@ -46,7 +53,7 @@ cat > "$OUT/ExportOptions.plist" <<PLIST
 <dict>
   <key>method</key><string>developer-id</string>
   <key>teamID</key><string>$TEAM</string>
-  <key>signingStyle</key><string>automatic</string>
+  <key>signingStyle</key><string>$SIGNING_STYLE</string>$SIGNING_CERT
   <key>destination</key><string>upload</string>
 </dict>
 </plist>
