@@ -10,6 +10,7 @@ struct BelvedereApp: App {
         Window("Belvedere", id: "main") {
             MainWindow()
                 .environment(delegate.model)
+                .background(OpenWindowBridge(delegate: delegate))
         }
         .defaultSize(width: 1360, height: 860)
         .commands {
@@ -20,20 +21,49 @@ struct BelvedereApp: App {
                     .keyboardShortcut("s", modifiers: [.command, .option])
             }
         }
-        MenuBarExtra("Belvedere", systemImage: "building.columns") {
-            Text("Belvedere")
+        // Anteprima del pannello della menu bar in una finestra: `--args -BelvedereShowPanel YES`.
+        Window("Pannello", id: "panel-preview") {
+            MenuBarPanel()
+                .environment(delegate.model)
+                .background(.regularMaterial)
         }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(UserDefaults.standard.bool(forKey: "BelvedereShowPanel") ? .presented : .suppressed)
+
+        MenuBarExtra {
+            MenuBarPanel()
+                .environment(delegate.model)
+        } label: {
+            MenuBarLabel(active: delegate.model.workingCount + delegate.model.waitingCount,
+                         waiting: delegate.model.waitingCount > 0)
+        }
+        .menuBarExtraStyle(.window)
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    private var hotKey: GlobalHotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Appearance.current.apply()
+        hotKey = GlobalHotKey { [weak self] in self?.showMainWindow() }
         Task { await model.start() }
     }
+
+    /// Porta in primo piano la finestra principale, riaprendola se era chiusa.
+    func showMainWindow() {
+        NSApp.activate()
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" || $0.title == "Belvedere" }) {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            openMainWindow?()
+        }
+    }
+
+    /// Impostata dalla scena: apre la finestra con `openWindow(id: "main")`.
+    var openMainWindow: (() -> Void)?
 
     /// Chiudere la finestra lascia l'app nella menu bar.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -72,5 +102,15 @@ enum Appearance: String, CaseIterable, Identifiable {
         case .light: NSApp.appearance = NSAppearance(named: .aqua)
         case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
         }
+    }
+}
+
+/// Passa all'AppDelegate la funzione per riaprire la finestra principale.
+private struct OpenWindowBridge: View {
+    @Environment(\.openWindow) private var openWindow
+    let delegate: AppDelegate
+
+    var body: some View {
+        Color.clear.onAppear { delegate.openMainWindow = { openWindow(id: "main") } }
     }
 }

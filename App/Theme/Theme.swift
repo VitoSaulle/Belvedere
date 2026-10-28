@@ -115,6 +115,13 @@ enum Fmt {
         return "si azzera \(day) \(clock(date))"
     }
 
+    /// Forma breve per spazi stretti: «azzera 16:40» oggi, «azzera lun» altrimenti.
+    static func resetShort(_ date: Date?, now: Date = Date()) -> String? {
+        guard let date else { return nil }
+        if Calendar.current.isDate(date, inSameDayAs: now) { return "azzera \(clock(date))" }
+        return "azzera " + date.formatted(.dateTime.weekday(.abbreviated).locale(Locale(identifier: "it_IT")))
+    }
+
     /// Ultima cartella di un percorso.
     static func folder(_ path: String) -> String {
         let last = (path as NSString).lastPathComponent
