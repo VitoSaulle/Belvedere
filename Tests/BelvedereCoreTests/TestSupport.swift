@@ -28,3 +28,13 @@ func append(_ text: String, to url: URL) {
 extension Array where Element == Data {
     var strings: [String] { map { String(decoding: $0, as: UTF8.self) } }
 }
+
+enum Fixture {
+    static func url(_ name: String) -> URL {
+        Bundle.module.url(forResource: "Fixtures/\(name)", withExtension: nil)!
+    }
+    static func lines(_ name: String) -> [Data] {
+        let text = try! String(contentsOf: url(name), encoding: .utf8)
+        return text.split(separator: "\n").map { Data($0.utf8) }
+    }
+}
