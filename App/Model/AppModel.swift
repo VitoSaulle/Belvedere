@@ -150,6 +150,7 @@ final class AppModel {
         feedReady = true
 
         loops.append(repeating(every: .seconds(5)) { model in model.tick() })
+        loops.append(repeating(every: .seconds(5)) { model in await model.pollCodex() })
         loops.append(repeating(every: .seconds(10)) { model in await model.pollLMStudio() })
         loops.append(repeating(every: .seconds(60)) { model in await model.saveIndex() })
         await pollLMStudio()
@@ -292,7 +293,12 @@ final class AppModel {
             return
         }
         let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: s.agent)) ?? []
-        launch(LaunchOptions.resuming(s), history: history)
+        var options = LaunchOptions.resuming(s)
+        // Il log riporta la finestra dichiarata dall'agente; per un modello locale vale quella caricata in LM Studio.
+        if let local = options.local, let loaded = lmStudio?.models.first(where: { $0.id == local.id && $0.loaded }) {
+            options.local = LocalModelChoice(id: local.id, contextLength: loaded.contextLength ?? local.contextLength)
+        }
+        launch(options, history: history)
     }
 
     /// «Riprendi in Belvedere» solo se la sessione non è viva altrove: mai due processi sulla stessa sessione.
@@ -476,6 +482,13 @@ final class AppModel {
 
     private func refresh(paths: [String]) async {
         await absorb(await index.refresh(paths: paths))
+    }
+
+    /// Le sessioni Codex aperte non arrivano da FSEvents: vedi `TranscriptIndex.pollCodex`.
+    private func pollCodex() async {
+        let update = await index.pollCodex(now: Date())
+        guard !update.changed.isEmpty || !update.newBuckets.isEmpty else { return }
+        await absorb(update)
     }
 
     private func absorb(_ update: IndexUpdate) async {

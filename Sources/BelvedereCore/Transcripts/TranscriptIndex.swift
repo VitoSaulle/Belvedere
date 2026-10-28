@@ -160,6 +160,27 @@ public actor TranscriptIndex {
         return IndexUpdate(changed: changed, newBuckets: newBuckets)
     }
 
+    /// Codex tiene aperto il file di sessione e FSEvents non ne segnala le scritture finché non lo chiude:
+    /// si ricontrollano i file di oggi e di ieri e quelli modificati nelle ultime 48 ore.
+    /// I file invariati costano solo uno `stat`.
+    public func pollCodex(now: Date, calendar: Calendar = .current) async -> IndexUpdate {
+        loadIfNeeded()
+        var paths: Set<String> = []
+        for offset in [0, -1] {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
+            let d = calendar.dateComponents([.year, .month, .day], from: date)
+            let dir = roots.codex.appendingPathComponent(String(format: "%04d/%02d/%02d", d.year ?? 0, d.month ?? 0, d.day ?? 0))
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            for name in names where name.hasPrefix("rollout-") && name.hasSuffix(".jsonl") {
+                paths.insert(dir.appendingPathComponent(name).standardizedFileURL.path)
+            }
+        }
+        for (path, entry) in entries {
+            if case .codex = entry.reducer, now.timeIntervalSince(entry.mtime) < 48 * 3600 { paths.insert(path) }
+        }
+        return await refresh(paths: Array(paths))
+    }
+
     public func save() async throws {
         guard dirty else { return }
         try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)

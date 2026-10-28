@@ -136,6 +136,44 @@ import Testing
     }
 }
 
+extension TranscriptIndexTests {
+    /// Codex tiene aperto il file di sessione: FSEvents non segnala le scritture finché non lo chiude,
+    /// quindi i file recenti si ricontrollano a intervalli.
+    @Test func pollsOpenCodexRollouts() async throws {
+        let day = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        let dir = String(format: "codex/%04d/%02d/%02d", day.year!, day.month!, day.day!)
+        let lines = text("codex-sample.jsonl").split(separator: "\n", omittingEmptySubsequences: true)
+        let half = lines.count / 2
+        let file = tmp.file("\(dir)/rollout-2026-10-27T10-00-00-01a1494b-8ccc-7553-99cb-df33363f95a1.jsonl",
+                            lines.prefix(half).joined(separator: "\n") + "\n")
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        let first = await index.refreshAll(progress: nil)
+        let before = try #require(first.changed.first).tokens.total
+        #expect(await index.pollCodex(now: Date()).changed.isEmpty)
+        let handle = try FileHandle(forWritingTo: file)
+        handle.seekToEndOfFile()
+        handle.write(Data((lines.dropFirst(half).joined(separator: "\n") + "\n").utf8))
+        try handle.close()
+        let polled = await index.pollCodex(now: Date().addingTimeInterval(1))
+        #expect(polled.changed.count == 1)
+        #expect(try #require(polled.changed.first).tokens.total > before)
+    }
+
+    /// Una sessione nata giorni fa ma ancora aperta: conta l'ultima modifica, non la cartella del giorno.
+    @Test func pollsRecentlyModifiedOlderRollouts() async throws {
+        let file = tmp.file("codex/2026/01/02/rollout-2026-01-02T10-00-00-01a1494b-8ccc-7553-99cb-df33363f95a1.jsonl",
+                            text("codex-sample.jsonl"))
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let handle = try FileHandle(forWritingTo: file)
+        handle.seekToEndOfFile()
+        handle.write(Data("{\"type\":\"turn_context\",\"timestamp\":\"2026-01-02T10:05:00Z\",\"payload\":{\"model\":\"gpt-x\"}}\n".utf8))
+        try handle.close()
+        let polled = await index.pollCodex(now: Date().addingTimeInterval(1))
+        #expect(polled.changed.first?.model == "gpt-x")
+    }
+}
+
 @Suite struct DirectoryWatcherTests {
     @Test func reportsChangedFiles() async throws {
         let tmp = TempDir()
