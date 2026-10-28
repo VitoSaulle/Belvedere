@@ -46,6 +46,23 @@ import Testing
         #expect(await b == .allow)
     }
 
+    @Test func answerBeforeTheWaitIsKept() async {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        await broker.resolve(requestID: "r1", with: .deny(reason: "no"))
+        #expect(await broker.decision(for: "r1") == .deny(reason: "no"))
+    }
+
+    @Test func oldTimerDoesNotCloseANewWait() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 0.3))
+        async let first = broker.decision(for: "r1")
+        try await Task.sleep(for: .milliseconds(200))
+        async let second = broker.decision(for: "r1")
+        #expect(await first == nil)
+        try await Task.sleep(for: .milliseconds(150))
+        await broker.resolve(requestID: "r1", with: .allow)
+        #expect(await second == .allow)
+    }
+
     @Test func observeOnlyReturnsImmediately() async {
         let broker = PermissionBroker(policy: .observeOnly)
         #expect(await broker.decision(for: "r1") == nil)

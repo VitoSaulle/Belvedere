@@ -88,6 +88,26 @@ import Testing
         #expect(TranscriptIndex.cacheVersion > 1)
     }
 
+    @Test func saveSkipsAnUnchangedIndex() async throws {
+        _ = seed()
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        try await index.save()
+        try FileManager.default.removeItem(at: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        try await index.save()
+        #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    @Test func cacheIsReadWhenFirstNeeded() async throws {
+        _ = seed()
+        let later = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        let first = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await first.refreshAll(progress: nil)
+        try await first.save()
+        #expect(await later.sessions.count == (await first.sessions).count)
+    }
+
     @Test func progressReachesOne() async {
         _ = seed()
         let seen = Locked<[Double]>([])

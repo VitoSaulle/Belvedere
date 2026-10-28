@@ -152,14 +152,16 @@ public struct SettingsFile {
                 target = url.deletingLastPathComponent().appendingPathComponent("\(stem)-\(n).bak")
                 n += 1
             }
-            try fm.copyItem(at: url, to: target)
+            // Il contenuto, non il link: un settings.json gestito da dotfiles resta salvato.
+            try fm.copyItem(at: url.resolvingSymlinksInPath(), to: target)
             backup = target
         } else {
             try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         }
         let data = try JSONSerialization.data(withJSONObject: settings,
                                               options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try data.write(to: url, options: .atomic)
+        // Si scrive nel file a cui punta un eventuale link, che così resta un link.
+        try data.write(to: url.resolvingSymlinksInPath(), options: .atomic)
         return backup
     }
 }
