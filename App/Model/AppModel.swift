@@ -152,11 +152,13 @@ final class AppModel {
 
     // MARK: - Azioni
 
-    func respond(to sessionID: String, with decision: PermissionDecision) {
-        guard let pending = session(sessionID)?.pending, pending.kind == .permission else { return }
+    /// Risponde alla richiesta mostrata, identificata dal suo id: se nel frattempo ne è arrivata
+    /// un'altra, la risposta non le passa.
+    func respond(to request: PendingRequest, with decision: PermissionDecision) {
+        guard request.kind == .permission else { return }
         let broker = self.broker
-        Task { await broker.resolve(requestID: pending.id, with: decision) }
-        store.clearPending(sessionID: sessionID)
+        Task { await broker.resolve(requestID: request.id, with: decision) }
+        store.clearPending(requestID: request.id)
         publish()
     }
 
@@ -187,7 +189,12 @@ final class AppModel {
                 let origin = event.callerPID.flatMap { OriginResolver.resolve(pid: $0) }
                 await self?.ingest(event, origin: origin)
                 guard name == "PermissionRequest" else { return (200, Data()) }
-                return (200, HookResponse.body(for: await broker.decision(for: event.requestID)))
+                let holding = await broker.isHolding
+                let decision = await broker.decision(for: event.requestID)
+                // Finita l'attesa (risposta, scadenza o hook chiuso dal terminale) la richiesta
+                // non si può più servire da qui. In sola osservazione resta finché i hook la chiudono.
+                if holding { await self?.requestClosed(event.requestID) }
+                return (200, HookResponse.body(for: decision))
             }
             if path == "/statusline" {
                 guard let payload = try? StatusLinePayload.decode(body, now: Date()) else { return (400, Data()) }
@@ -205,8 +212,17 @@ final class AppModel {
         }
     }
 
+    private func requestClosed(_ requestID: String) {
+        store.clearPending(requestID: requestID)
+        publish()
+    }
+
     private func ingest(_ event: HookEvent, origin: SessionOrigin?) {
-        store.apply(event, origin: origin)
+        let closed = store.apply(event, origin: origin)
+        if !closed.isEmpty {
+            let broker = self.broker
+            Task { for id in closed { await broker.cancel(requestID: id) } }
+        }
         if event.name == "PreCompact" || event.name == "PostCompact" {
             let name = session(event.sessionID)?.displayName ?? event.sessionID
             let text = event.name == "PreCompact" ? "compatta il contesto" : "contesto compattato"

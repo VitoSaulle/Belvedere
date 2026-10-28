@@ -10,7 +10,8 @@ public struct LiveSessionStore: Sendable {
     struct HookState: Sendable {
         var status: SessionStatus?
         var statusAt: Date
-        var pending: PendingRequest?
+        /// Richieste aperte, dalla più vecchia: più subagenti o strumenti in parallelo possono chiedere insieme.
+        var pending: [PendingRequest] = []
         var cwd: String?
         var transcriptPath: String?
         var origin: SessionOrigin?
@@ -41,12 +42,15 @@ public struct LiveSessionStore: Sendable {
         }
     }
 
-    public mutating func apply(_ event: HookEvent, origin: SessionOrigin?) {
+    /// Applica l'evento e restituisce gli id delle richieste di permesso che ha chiuso.
+    @discardableResult
+    public mutating func apply(_ event: HookEvent, origin: SessionOrigin?) -> [String] {
         advance(to: event.receivedAt)
         var state = hooks[event.sessionID] ?? HookState(statusAt: event.receivedAt)
         if let cwd = event.cwd { state.cwd = cwd }
         if let path = event.transcriptPath { state.transcriptPath = path }
         if let origin { state.origin = origin }
+        let before = state.pending
         for effect in event.effects {
             switch effect {
             case .register:
@@ -56,20 +60,27 @@ public struct LiveSessionStore: Sendable {
                 state.status = status
                 state.statusAt = event.receivedAt
             case .pending(let request):
-                state.pending = request
+                state.pending.removeAll { $0.id == request.id }
+                state.pending.append(request)
                 state.status = .waiting
                 state.statusAt = event.receivedAt
             case .clearPending:
-                state.pending = nil
+                state.pending = []
+            case .clearTool(let key):
+                state.pending.removeAll { $0.kind == .question || ($0.toolKey != nil && $0.toolKey == key) }
             case .ended:
                 state.ended = true
-                state.pending = nil
+                state.pending = []
                 state.statusAt = event.receivedAt
             case .none:
                 break
             }
         }
+        // Un PostToolUse di un altro strumento non deve far sembrare al lavoro chi aspetta ancora l'utente.
+        if !state.pending.isEmpty { state.status = .waiting }
         hooks[event.sessionID] = state
+        let open = Set(state.pending.map(\.id))
+        return before.filter { $0.kind == .permission && !open.contains($0.id) }.map(\.id)
     }
 
     public mutating func apply(_ status: StatusLinePayload) {
@@ -91,9 +102,15 @@ public struct LiveSessionStore: Sendable {
         now = date
     }
 
-    /// Toglie la richiesta in sospeso dopo una risposta data in Belvedere.
-    public mutating func clearPending(sessionID: String) {
-        hooks[sessionID]?.pending = nil
+    /// Toglie una richiesta: risposta data in Belvedere, oppure connessione del hook chiusa
+    /// perché l'utente ha risposto nel terminale.
+    public mutating func clearPending(requestID: String) {
+        for id in hooks.keys {
+            guard var state = hooks[id], state.pending.contains(where: { $0.id == requestID }) else { continue }
+            state.pending.removeAll { $0.id == requestID }
+            if state.pending.isEmpty, state.status == .waiting { state.status = .idle }
+            hooks[id] = state
+        }
     }
 
     // MARK: - Uscite
@@ -142,13 +159,11 @@ public struct LiveSessionStore: Sendable {
             // Oltre il timeout del hook nessuno può più rispondere da qui: se il processo è morto
             // senza altri eventi, la richiesta resterebbe aperta per sempre.
             s.pending = nil
-            if let pending = hook.pending {
-                if now.timeIntervalSince(pending.receivedAt) < Self.hookPrecedence {
-                    s.pending = pending
-                    s.status = .waiting
-                } else if s.status == .waiting {
-                    s.status = .idle
-                }
+            if let pending = hook.pending.first(where: { now.timeIntervalSince($0.receivedAt) < Self.hookPrecedence }) {
+                s.pending = pending
+                s.status = .waiting
+            } else if !hook.pending.isEmpty, s.status == .waiting {
+                s.status = .idle
             }
             if hook.ended { s.status = .ended; s.pending = nil }
         }

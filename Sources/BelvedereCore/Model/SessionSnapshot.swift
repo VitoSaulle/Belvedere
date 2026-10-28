@@ -41,9 +41,12 @@ public struct PendingRequest: Codable, Equatable, Sendable {
     public let toolName: String?
     public let summary: String
     public let receivedAt: Date
+    /// Strumento e input della richiesta: la accoppia al `PostToolUse` che la chiude.
+    public let toolKey: String?
 
-    public init(id: String, kind: Kind, toolName: String?, summary: String, receivedAt: Date) {
+    public init(id: String, kind: Kind, toolName: String?, summary: String, receivedAt: Date, toolKey: String? = nil) {
         self.id = id
+        self.toolKey = toolKey
         self.kind = kind
         self.toolName = toolName
         self.summary = summary

@@ -25,9 +25,54 @@ import Testing
         #expect(waiting.status == .waiting)
         #expect(waiting.pending?.id == "t1")
         #expect(store.waitingCount == 1)
-        store.apply(hook("PostToolUse"), origin: nil)
+        let removed = store.apply(hook("PostToolUse", #","tool_name":"Bash","tool_use_id":"t1","tool_input":{"command":"rm -rf x"}"#), origin: nil)
         #expect(store.sessions.first?.status == .working)
         #expect(store.sessions.first?.pending == nil)
+        #expect(removed == ["t1"])
+    }
+
+    private let bash = #","tool_name":"Bash","tool_input":{"command":"rm -rf x"}"#
+
+    @Test func postToolUseOfAnotherToolKeepsPermission() {
+        var store = LiveSessionStore()
+        store.apply(hook("PermissionRequest", bash), origin: nil)
+        let removed = store.apply(hook("PostToolUse", #","tool_name":"Read","tool_use_id":"r1","tool_input":{"file_path":"/a"}"#), origin: nil)
+        #expect(removed.isEmpty)
+        #expect(store.sessions.first?.pending?.toolName == "Bash")
+        #expect(store.sessions.first?.status == .waiting)
+    }
+
+    @Test func twoRequestsInOneSessionAreAnsweredSeparately() throws {
+        var store = LiveSessionStore()
+        store.apply(hook("PermissionRequest", bash), origin: nil)
+        store.apply(hook("PermissionRequest", #","tool_name":"Write","tool_input":{"file_path":"/b"}"#), origin: nil)
+        let first = try #require(store.sessions.first?.pending)
+        #expect(first.summary == "rm -rf x")
+        store.clearPending(requestID: first.id)
+        #expect(store.sessions.first?.pending?.summary == "/b")
+        #expect(store.sessions.first?.status == .waiting)
+    }
+
+    /// Il hook chiuso dal terminale chiude la richiesta: la sessione non aspetta più l'utente.
+    @Test func closingLastRequestStopsWaiting() throws {
+        var store = LiveSessionStore()
+        store.apply(hook("PermissionRequest", bash), origin: nil)
+        store.apply(hook("Notification", #","notification_type":"permission_prompt""#), origin: nil)
+        let id = try #require(store.sessions.first?.pending?.id)
+        store.clearPending(requestID: id)
+        #expect(store.sessions.first?.status == .idle)
+        #expect(store.waitingCount == 0)
+    }
+
+    /// Negata nel terminale con Esc: nessun PostToolUse né Stop, il primo evento è il prompt successivo.
+    @Test func newPromptClearsRequestDeniedInTerminal() throws {
+        var store = LiveSessionStore()
+        store.apply(hook("PermissionRequest", bash), origin: nil)
+        let id = try #require(store.sessions.first?.pending?.id)
+        let removed = store.apply(hook("UserPromptSubmit"), origin: nil)
+        #expect(removed == [id])
+        #expect(store.sessions.first?.pending == nil)
+        #expect(store.sessions.first?.status == .working)
     }
 
     @Test func orphanPendingExpires() {

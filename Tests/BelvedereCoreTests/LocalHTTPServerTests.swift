@@ -30,6 +30,35 @@ import Testing
         #expect(String(decoding: seen.2, as: UTF8.self) == #"{"session_id":"s1"}"#)
     }
 
+    /// Claude Code uccide il hook quando l'utente risponde nel terminale: l'attesa va cancellata.
+    @Test func clientDisconnectCancelsHandler() async throws {
+        let cancelled = Locked(false)
+        let server = LocalHTTPServer(port: 0) { _, _, _ in
+            do { try await Task.sleep(for: .seconds(5)) } catch { cancelled.withLock { $0 = true } }
+            return (200, Data())
+        }
+        try server.start()
+        defer { server.stop() }
+        let port = try #require(server.port)
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        #expect(connected == 0)
+        let request = "POST /hooks/PermissionRequest HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\n{}"
+        _ = request.withCString { write(fd, $0, strlen($0)) }
+        try await Task.sleep(for: .milliseconds(100))
+        close(fd)
+        for _ in 0..<20 where !cancelled.withLock({ $0 }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(cancelled.withLock { $0 })
+    }
+
     @Test func rejectsOversizedBody() async throws {
         let server = LocalHTTPServer(port: 0) { _, _, _ in (200, Data()) }
         try server.start()

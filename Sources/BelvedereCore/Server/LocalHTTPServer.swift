@@ -79,13 +79,44 @@ public final class LocalHTTPServer: Sendable {
                 self.receive(connection, buffer: buffer)
             case .incomplete, .malformed:
                 self.respond(connection, status: 400, body: Data())
-            case .tooLarge:
-                self.respond(connection, status: 413, body: Data())
+            case .tooLarge(let total):
+                // Chiudere con dati non letti fa partire un RST e il client perde il 413:
+                // si scarta il resto del corpo (entro un limite) e poi si risponde.
+                self.discard(connection, remaining: min(total, Self.drainLimit) - buffer.count)
             case .request(let method, let path, let body):
-                Task {
+                let task = Task {
                     let result = await self.handler(method, path, body)
-                    self.respond(connection, status: result.status, body: result.body)
+                    if !Task.isCancelled { self.respond(connection, status: result.status, body: result.body) }
                 }
+                self.watchClose(connection, cancelling: task)
+            }
+        }
+    }
+
+    static let drainLimit = 8 << 20
+
+    private func discard(_ connection: NWConnection, remaining: Int) {
+        guard remaining > 0 else { respond(connection, status: 413, body: Data()); return }
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] chunk, _, isComplete, error in
+            guard let self else { connection.cancel(); return }
+            let count = chunk?.count ?? 0
+            if isComplete || error != nil || count == 0 {
+                self.respond(connection, status: 413, body: Data())
+            } else {
+                self.discard(connection, remaining: remaining - count)
+            }
+        }
+    }
+
+    /// Se il client chiude prima della risposta (il hook ucciso perché l'utente ha risposto
+    /// nel terminale), la gestione in corso viene cancellata.
+    private func watchClose(_ connection: NWConnection, cancelling task: Task<Void, Never>) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] _, _, isComplete, error in
+            if isComplete || error != nil {
+                task.cancel()
+                connection.cancel()
+            } else {
+                self?.watchClose(connection, cancelling: task)
             }
         }
     }
@@ -100,7 +131,9 @@ public final class LocalHTTPServer: Sendable {
     }
 
     enum Parsed: Equatable {
-        case incomplete, malformed, tooLarge
+        case incomplete, malformed
+        /// Corpo oltre il limite; `total` = byte attesi fra intestazioni e corpo.
+        case tooLarge(total: Int)
         case request(method: String, path: String, body: Data)
     }
 
@@ -120,7 +153,7 @@ public final class LocalHTTPServer: Sendable {
                 length = n
             }
         }
-        if length > maxBody { return .tooLarge }
+        if length > maxBody { return .tooLarge(total: end.upperBound + length) }
         let body = buffer[end.upperBound...]
         guard body.count >= length else { return .incomplete }
         return .request(method: String(parts[0]), path: String(parts[1]), body: Data(body.prefix(length)))

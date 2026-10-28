@@ -32,11 +32,12 @@ import Testing
 
     @Test func effectsMap() throws {
         #expect(try event("SessionStart", #","belvedere_ppid":7"#).effects == [.register(cwd: "/p", transcriptPath: "/t/s1.jsonl", pid: 7)])
-        for name in ["UserPromptSubmit", "PreToolUse", "SubagentStart", "PreCompact"] {
+        for name in ["PreToolUse", "SubagentStart", "PreCompact"] {
             #expect(try event(name).effects == [.status(.working)], "\(name)")
         }
+        #expect(try event("UserPromptSubmit").effects == [.clearPending, .status(.working)])
         for name in ["PostToolUse", "PostToolUseFailure"] {
-            #expect(try event(name).effects == [.clearPending, .status(.working)], "\(name)")
+            #expect(try event(name).effects == [.clearTool(key: nil), .status(.working)], "\(name)")
         }
         for name in ["Stop", "StopFailure"] {
             #expect(try event(name).effects == [.clearPending, .status(.done)], "\(name)")
@@ -45,6 +46,18 @@ import Testing
         #expect(try event("Notification", #","notification_type":"permission_prompt""#).effects == [.status(.waiting)])
         #expect(try event("Notification", #","notification_type":"idle_prompt""#).effects == [.status(.idle)])
         #expect(try event("Whatever").effects == [.none])
+    }
+
+    /// Il `PermissionRequest` reale non porta `tool_use_id`: lo si accoppia al `PostToolUse` per strumento e input.
+    @Test func permissionAndPostToolUseShareToolKey() throws {
+        let request = try event("PermissionRequest", #","tool_name":"Bash","tool_input":{"description":"d","command":"touch a"}"#)
+        let post = try event("PostToolUse", #","tool_name":"Bash","tool_use_id":"toolu_1","tool_input":{"command":"touch a","description":"d"}"#)
+        let other = try event("PostToolUse", #","tool_name":"Bash","tool_use_id":"toolu_2","tool_input":{"command":"touch b"}"#)
+        #expect(request.toolKey != nil)
+        #expect(request.toolKey == post.toolKey)
+        #expect(request.toolKey != other.toolKey)
+        guard case .pending(let req) = request.effects.first else { Issue.record("atteso .pending"); return }
+        #expect(req.toolKey == request.toolKey)
     }
 
     @Test func pendingEffects() throws {

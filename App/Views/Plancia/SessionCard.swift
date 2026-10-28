@@ -154,10 +154,10 @@ struct PendingBox: View {
             HStack(spacing: 8) {
                 Spacer()
                 if pending.kind == .permission && model.policy != .observeOnly {
-                    Button("Nega") { model.respond(to: session.id, with: .deny(reason: "Negato da Belvedere")) }
+                    Button("Nega") { model.respond(to: pending, with: .deny(reason: "Negato da Belvedere")) }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)
-                    Button("Consenti") { model.respond(to: session.id, with: .allow) }
+                    Button("Consenti") { model.respond(to: pending, with: .allow) }
                         .buttonStyle(.borderedProminent)
                         .buttonBorderShape(.capsule)
                         .tint(Color.primary)

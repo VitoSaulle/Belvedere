@@ -20,6 +20,32 @@ import Testing
         #expect(await decision == .allow)
     }
 
+    /// Il hook ucciso dal terminale chiude la connessione: il server cancella l'attesa.
+    @Test func cancellingTheWaitReturnsNilAtOnce() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        let wait = Task { await broker.decision(for: "r1") }
+        try await Task.sleep(for: .milliseconds(50))
+        let clock = ContinuousClock()
+        var decision: PermissionDecision? = .allow
+        let elapsed = await clock.measure {
+            wait.cancel()
+            decision = await wait.value
+        }
+        #expect(decision == nil)
+        #expect(elapsed < .milliseconds(500))
+    }
+
+    @Test func cancelReleasesOnlyThatRequest() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        async let a = broker.decision(for: "a")
+        async let b = broker.decision(for: "b")
+        try await Task.sleep(for: .milliseconds(50))
+        await broker.cancel(requestID: "a")
+        #expect(await a == nil)
+        await broker.resolve(requestID: "b", with: .allow)
+        #expect(await b == .allow)
+    }
+
     @Test func observeOnlyReturnsImmediately() async {
         let broker = PermissionBroker(policy: .observeOnly)
         #expect(await broker.decision(for: "r1") == nil)

@@ -184,9 +184,9 @@ struct NeedsYouContent: View {
             HStack(spacing: 8) {
                 Spacer()
                 if request.kind == .permission && model.policy != .observeOnly {
-                    pill("Nega", strong: false) { model.respond(to: sessionID, with: .deny(reason: "Negato da Belvedere")) }
+                    pill("Nega", strong: false) { model.respond(to: request, with: .deny(reason: "Negato da Belvedere")) }
                     pill("Apri", strong: false) { controller.open(sessionID) }
-                    pill("Consenti", strong: true) { model.respond(to: sessionID, with: .allow) }
+                    pill("Consenti", strong: true) { model.respond(to: request, with: .allow) }
                 } else {
                     pill("Apri", strong: false) { controller.open(sessionID) }
                     pill("Vai al terminale", strong: true) { model.activateOrigin(of: sessionID) }

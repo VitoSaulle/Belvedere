@@ -12,6 +12,8 @@ public struct HookEvent: Sendable {
     public let notificationType: String?
     public let message: String?
     public let callerPID: Int32?
+    /// Nome dello strumento e input in forma canonica; `nil` se l'evento non riguarda uno strumento.
+    public let toolKey: String?
     /// `tool_use_id` se presente, altrimenti un identificativo generato: collega la richiesta alla risposta.
     public let requestID: String
     public let receivedAt: Date
@@ -36,8 +38,15 @@ public struct HookEvent: Sendable {
                          notificationType: obj["notification_type"] as? String,
                          message: obj["message"] as? String,
                          callerPID: (obj["belvedere_ppid"] as? NSNumber)?.int32Value,
+                         toolKey: toolKey(name: obj["tool_name"] as? String, input: obj["tool_input"]),
                          requestID: obj["tool_use_id"] as? String ?? UUID().uuidString,
                          receivedAt: Date())
+    }
+
+    private static func toolKey(name: String?, input: Any?) -> String? {
+        guard let name else { return nil }
+        let data = input.flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys, .fragmentsAllowed]) }
+        return name + "\u{1F}" + String(decoding: data ?? Data(), as: UTF8.self)
     }
 }
 
@@ -46,7 +55,10 @@ public enum HookEffect: Equatable, Sendable {
     case register(cwd: String?, transcriptPath: String?, pid: Int32?)
     case status(SessionStatus)
     case pending(PendingRequest)
+    /// Toglie tutte le richieste della sessione.
     case clearPending
+    /// Toglie le domande e le richieste di permesso per questo strumento e input.
+    case clearTool(key: String?)
     case ended
     case none
 }
@@ -56,13 +68,18 @@ extension HookEvent {
         switch name {
         case "SessionStart":
             return [.register(cwd: cwd, transcriptPath: transcriptPath, pid: callerPID)]
-        case "UserPromptSubmit", "PreToolUse", "SubagentStart", "PreCompact":
+        case "UserPromptSubmit":
+            // Un nuovo prompt vuol dire che nessun dialogo è più aperto: anche una richiesta
+            // negata nel terminale con Esc, che non produce né PostToolUse né Stop, si chiude qui.
+            return [.clearPending, .status(.working)]
+        case "PreToolUse", "SubagentStart", "PreCompact":
             return [.status(.working)]
         case "PostToolUse", "PostToolUseFailure":
-            return [.clearPending, .status(.working)]
+            return [.clearTool(key: toolKey), .status(.working)]
         case "PermissionRequest":
             return [.pending(PendingRequest(id: requestID, kind: .permission, toolName: toolName,
-                                            summary: toolSummary ?? toolName ?? "", receivedAt: receivedAt))]
+                                            summary: toolSummary ?? toolName ?? "", receivedAt: receivedAt,
+                                            toolKey: toolKey))]
         case "Notification":
             switch notificationType {
             case "permission_prompt": return [.status(.waiting)]
