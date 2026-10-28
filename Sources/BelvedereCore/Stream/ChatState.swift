@@ -3,6 +3,8 @@ import Foundation
 /// Conversazione di una sessione lanciata da Belvedere, ricostruita dai messaggi stream-json.
 public struct ChatState: Sendable {
     public var agent: AgentKind
+    /// Modello di LM Studio: niente costi e niente quota del piano.
+    public var isLocal: Bool
     public var items: [TranscriptItem]
     /// Testo dell'assistente ancora in arrivo nel turno in corso.
     public var streaming: String?
@@ -23,15 +25,18 @@ public struct ChatState: Sendable {
     public var lastError: String?
     public var lastActivity: Date?
 
-    public init(agent: AgentKind = .claude, history: [TranscriptItem] = []) {
+    public init(agent: AgentKind = .claude, isLocal: Bool = false, history: [TranscriptItem] = []) {
         self.agent = agent
+        self.isLocal = isLocal
         items = history
     }
 
     /// Una sessione ripresa con `--resume`: la CLI manda `init` solo al primo turno,
     /// ma id e cartella sono già noti.
-    public init(agent: AgentKind = .claude, history: [TranscriptItem] = [], resuming sessionID: String, folder: String) {
+    public init(agent: AgentKind = .claude, isLocal: Bool = false, history: [TranscriptItem] = [],
+                resuming sessionID: String, folder: String) {
         self.agent = agent
+        self.isLocal = isLocal
         items = history
         self.sessionID = sessionID
         cwd = folder
@@ -137,6 +142,7 @@ public struct ChatState: Sendable {
         var s = SessionSnapshot(id: sessionID, agent: agent, cwd: cwd ?? "")
         s.status = status
         s.model = model
+        s.isLocalModel = isLocal
         s.startedAt = launchedAt
         s.lastActivity = lastActivity ?? launchedAt
         s.contextTokens = contextTokens

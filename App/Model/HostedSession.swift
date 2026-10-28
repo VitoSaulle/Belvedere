@@ -25,8 +25,10 @@ final class HostedSession: Identifiable {
 
     init(options: LaunchOptions, history: [TranscriptItem] = []) {
         self.options = options
-        state = options.resumeID.map { ChatState(agent: options.agent, history: history, resuming: $0, folder: options.folder) }
-            ?? ChatState(agent: options.agent, history: history)
+        let local = options.local != nil
+        state = options.resumeID.map {
+            ChatState(agent: options.agent, isLocal: local, history: history, resuming: $0, folder: options.folder)
+        } ?? ChatState(agent: options.agent, isLocal: local, history: history)
     }
 
     var agent: AgentKind { options.agent }
@@ -216,7 +218,7 @@ final class HostedSession: Identifiable {
         clearedFrom = state.sessionID
         options = options.resuming("", cwd: state.cwd)
         options.resumeID = nil
-        state = ChatState(agent: agent)
+        state = ChatState(agent: agent, isLocal: options.local != nil)
         start()
     }
 

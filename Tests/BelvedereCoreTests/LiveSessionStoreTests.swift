@@ -98,6 +98,22 @@ import Testing
         #expect(store.sessions.first?.pending != nil)
     }
 
+    /// La CLI calcola `total_cost_usd` con i prezzi di Claude anche su un modello locale: non è un costo.
+    @Test func localSessionsHaveNoCost() throws {
+        var store = LiveSessionStore()
+        store.apply(IndexUpdate(changed: [logSnapshot(status: .done)], newBuckets: []))
+        var hosted = SessionSnapshot(id: "s1", agent: .claude, cwd: "/p")
+        hosted.isLocalModel = true
+        hosted.costUSD = 0.06
+        hosted.lastActivity = Date()
+        store.setHosted(["s1"])
+        store.apply(hosted: hosted)
+        #expect(try #require(store.sessions.first).costUSD == nil)
+        var state = ChatState(isLocal: true)
+        state.sessionID = "s2"
+        #expect(state.snapshot(launchedAt: nil)?.isLocalModel == true)
+    }
+
     @Test func hostedOverlayWins() throws {
         var store = LiveSessionStore()
         var log = logSnapshot(status: .done)

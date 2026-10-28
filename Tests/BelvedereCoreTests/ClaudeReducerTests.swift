@@ -10,6 +10,12 @@ import Testing
     }
     private var all: [Data] { Fixture.lines("claude-sample.jsonl") }
 
+    /// Fuori da un repository Claude Code scrive `gitBranch: "HEAD"`: non è un ramo da mostrare.
+    @Test func ignoresHeadAsBranch() {
+        let line = Data(#"{"type":"user","sessionId":"s1","cwd":"/p","gitBranch":"HEAD","timestamp":"2026-10-28T10:00:00.000Z","message":{"role":"user","content":"ciao"}}"#.utf8)
+        #expect(reduced([line]).snapshot.gitBranch == nil)
+    }
+
     @Test func countsEachMessageOnce() {
         let s = reduced(all).snapshot
         #expect(s.tokens == TokenTotals(input: 18, output: 90, cacheRead: 4500, cacheWrite: 650))

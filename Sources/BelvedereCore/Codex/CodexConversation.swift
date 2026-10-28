@@ -66,7 +66,7 @@ public struct CodexConversation: Sendable {
         threadID = nil
         turnID = nil
         requests = [:]
-        state = ChatState(agent: .codex)
+        state = ChatState(agent: .codex, isLocal: options.local != nil)
         return [startThread(resuming: nil)]
     }
 

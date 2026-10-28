@@ -217,6 +217,8 @@ public struct LiveSessionStore: Sendable {
             if let tokens = live.contextTokens { s.contextTokens = tokens }
             if let window = live.contextWindow { s.contextWindow = window }
             if let cost = live.costUSD { s.costUSD = cost }
+            if live.isLocalModel { s.isLocalModel = true }
+            if s.isLocalModel { s.costUSD = nil }
             if let text = live.lastText { s.lastText = text }
             if s.cwd.isEmpty { s.cwd = live.cwd }
             if (s.lastActivity ?? .distantPast) < (live.lastActivity ?? .distantPast) { s.lastActivity = live.lastActivity }
