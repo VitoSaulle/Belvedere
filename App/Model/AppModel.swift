@@ -56,6 +56,8 @@ final class AppModel {
     /// Cartelle con un `claude` o un `codex` vivo che non è di Belvedere (terminale, IntelliJ…),
     /// aggiornate ogni 5 s; `nil` finché non sono state lette.
     private(set) var busyFolders: [AgentKind: Set<String>]?
+    /// Sessioni passate al terminale il cui processo è ancora vivo; aggiornato col tick, non a ogni ridisegno.
+    private(set) var terminalOwned: Set<String> = []
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
@@ -314,10 +316,7 @@ final class AppModel {
         // vale anche dopo un crash (log fermo su «al lavoro») e per le sessioni nate prima di Belvedere.
         guard let busy = busyFolders?[s.agent], !busy.contains(RunningProcesses.canonical(s.cwd)) else { return false }
         // Passata al terminale: finché quel processo vive, anche prima dei suoi hook, la sessione è sua.
-        let pidFile = Self.handoffPID(s.id)
-        // Appena passata il PID può non essere ancora scritto: intanto vale come occupata.
-        if handedOff.contains(s.id), !FileManager.default.fileExists(atPath: pidFile.path) { return false }
-        return !TerminalHandoff.isRunning(pidFile: pidFile)
+        return !terminalOwned.contains(s.id)
     }
 
     /// Cartelle dei `claude` o `codex` vivi, esclusi quelli lanciati da Belvedere.
@@ -328,6 +327,20 @@ final class AppModel {
     private func refreshBusyFolders() {
         let folders = Dictionary(uniqueKeysWithValues: AgentKind.allCases.map { ($0, agentFolders($0)) })
         if folders != busyFolders { busyFolders = folders }
+        let owned = Set(Self.handoffIDs().union(handedOff).filter { id in
+            let pidFile = Self.handoffPID(id)
+            // Appena passata il PID può non essere ancora scritto: intanto vale come occupata.
+            if handedOff.contains(id), !FileManager.default.fileExists(atPath: pidFile.path) { return true }
+            return TerminalHandoff.isRunning(pidFile: pidFile)
+        })
+        if owned != terminalOwned { terminalOwned = owned }
+    }
+
+    /// Le sessioni passate al terminale in questa esecuzione e quelle con un file PID rimasto da prima.
+    private static func handoffIDs() -> Set<String> {
+        let dir = Belvedere.supportDirectory.appendingPathComponent("handoff")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return Set(files.filter { $0.hasSuffix(".pid") }.map { String($0.dropLast(4)) })
     }
 
     private static func handoffPID(_ id: String) -> URL {
