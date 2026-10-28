@@ -27,4 +27,11 @@ import Testing
         state.sessionID = "t1"
         #expect(state.snapshot(launchedAt: nil)?.agent == .codex)
     }
+
+    @Test func exitMessageNamesTheAgent() {
+        var state = ChatState(agent: .codex)
+        state.processExited(code: 1, stderr: "", now: Date())
+        #expect(state.lastError == "Codex si è chiuso con il codice 1.")
+        #expect(AgentKind.claude.productName == "Claude Code")
+    }
 }

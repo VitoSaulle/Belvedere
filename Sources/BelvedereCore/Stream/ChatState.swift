@@ -128,7 +128,7 @@ public struct ChatState: Sendable {
         lastActivity = now
         guard code != 0 else { return }
         let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        lastError = text.isEmpty ? "Claude Code si è chiuso con il codice \(code)." : text
+        lastError = text.isEmpty ? "\(agent.productName) si è chiuso con il codice \(code)." : text
     }
 
     /// La sessione come la vedono Plancia, menu bar e notch; `nil` finché Claude non ha dato l'id.
@@ -151,6 +151,11 @@ public struct ChatState: Sendable {
                                        summary: Self.summary(ask), receivedAt: lastActivity ?? Date())
         }
         return s
+    }
+
+    /// Riga della sessione che non è di nessuno (un'interruzione, un cambio di modello).
+    public mutating func addNote(_ text: String) {
+        items.append(.note(id: "nota-\(UUID().uuidString)", text: text))
     }
 
     mutating func upsert(_ item: TranscriptItem) {

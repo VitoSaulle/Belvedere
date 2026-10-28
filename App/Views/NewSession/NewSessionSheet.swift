@@ -8,6 +8,7 @@ struct NewSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var folder = ""
+    @State private var agent: AgentKind = .claude
     @State private var isLocal = false
     @State private var cloudModel: String?
     @State private var localModel: LMStudioModel?
@@ -45,7 +46,7 @@ struct NewSessionSheet: View {
             Button("Salta i permessi", role: .destructive) { permission = .skip }
             Button("Annulla", role: .cancel) {}
         } message: {
-            Text("Claude potrà modificare file ed eseguire comandi senza chiedere, per tutta la sessione.")
+            Text("\(Theme.agentName(agent)) potrà modificare file ed eseguire comandi senza chiedere, per tutta la sessione.")
         }
         .alert("Salva come preset", isPresented: $askPresetName) {
             TextField("Nome", text: $presetName)
@@ -122,10 +123,8 @@ struct NewSessionSheet: View {
     private var agentSection: some View {
         SheetSection(title: "Agente") {
             HStack(spacing: 10) {
-                ChoiceCard(title: "Claude Code", subtitle: "claude -p, stream-json", selected: true) {}
-                ChoiceCard(title: "Codex", subtitle: "In arrivo", selected: false) {}
-                    .disabled(true)
-                    .opacity(0.5)
+                ChoiceCard(title: "Claude Code", subtitle: "claude -p, stream-json", selected: agent == .claude) { agent = .claude }
+                ChoiceCard(title: "Codex", subtitle: "codex app-server", selected: agent == .codex) { agent = .codex }
             }
         }
     }
@@ -133,14 +132,15 @@ struct NewSessionSheet: View {
     private var whereSection: some View {
         SheetSection(title: "Modello") {
             HStack(spacing: 10) {
-                ChoiceCard(title: "Cloud", subtitle: "Usa il tuo piano Claude", selected: !isLocal) { isLocal = false }
+                ChoiceCard(title: "Cloud", subtitle: agent == .claude ? "Usa il tuo piano Claude" : "Modello e provider della config di Codex",
+                           selected: !isLocal) { isLocal = false }
                 ChoiceCard(title: "Locale · LM Studio", subtitle: "localhost:1234 · nessun token del piano", selected: isLocal) {
                     isLocal = true
                 }
             }
             if isLocal {
                 localModels
-            } else {
+            } else if agent == .claude {
                 Picker("Modello", selection: $cloudModel) {
                     ForEach(Self.cloudModels, id: \.1) { Text($0.1).tag($0.0) }
                 }
@@ -178,7 +178,7 @@ struct NewSessionSheet: View {
                     .buttonStyle(.plain)
                 }
             }
-            if let warning = LaunchAdvice.contextWarning(localModel?.contextLength) {
+            if let warning = LaunchAdvice.contextWarning(localModel?.contextLength, agent: agent) {
                 Text(warning).font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -201,7 +201,7 @@ struct NewSessionSheet: View {
                 .foregroundStyle(Theme.danger)
             }
             if permission == .skip {
-                Label("Claude non chiederà nulla in questa sessione. Clic su «Permessi saltati» per annullare.",
+                Label("\(Theme.agentName(agent)) non chiederà nulla in questa sessione. Clic su «Permessi saltati» per annullare.",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.callout)
                     .foregroundStyle(Theme.danger)
@@ -212,8 +212,8 @@ struct NewSessionSheet: View {
     private var isolationSection: some View {
         SheetSection(title: "Isolamento e nome") {
             Toggle("Lavora in un worktree git separato", isOn: $worktree)
-                .disabled(!isGitRepository)
-                .help(isGitRepository ? "" : "La cartella non è un repository git")
+                .disabled(!canUseWorktree)
+                .help(agent == .codex ? "Codex app-server non crea worktree" : isGitRepository ? "" : "La cartella non è un repository git")
             TextField("Nome della sessione (facoltativo)", text: $name)
                 .textFieldStyle(.roundedBorder)
         }
@@ -222,10 +222,14 @@ struct NewSessionSheet: View {
     private var commandPreview: some View {
         SheetSection(title: "Comando") {
             VStack(alignment: .leading, spacing: 4) {
-                if let local = options.local {
-                    Text("ANTHROPIC_BASE_URL=http://localhost:1234  ANTHROPIC_MODEL=\(local.id)")
+                if agent == .codex {
+                    Text(folder.isEmpty ? "codex" : CodexCommand.preview(options))
+                } else {
+                    if let local = options.local {
+                        Text("ANTHROPIC_BASE_URL=http://localhost:1234  ANTHROPIC_MODEL=\(local.id)")
+                    }
+                    Text(folder.isEmpty ? "claude" : ClaudeCommand.preview(options, isGitRepository: isGitRepository))
                 }
-                Text(folder.isEmpty ? "claude" : ClaudeCommand.preview(options, isGitRepository: isGitRepository))
             }
             .font(.system(size: 12, design: .monospaced))
             .foregroundStyle(.secondary)
@@ -260,14 +264,17 @@ struct NewSessionSheet: View {
 
     private var options: LaunchOptions {
         LaunchOptions(folder: folder,
-                      model: isLocal ? nil : cloudModel,
+                      agent: agent,
+                      model: isLocal || agent == .codex ? nil : cloudModel,
                       permission: permission,
                       local: isLocal ? localModel.map { LocalModelChoice(id: $0.id, contextLength: $0.contextLength) } : nil,
-                      worktree: worktree && isGitRepository,
+                      worktree: worktree && canUseWorktree,
                       name: name.trimmingCharacters(in: .whitespaces).isEmpty ? nil : name)
     }
 
     private var isGitRepository: Bool { !folder.isEmpty && GitInfo.isRepository(folder) }
+
+    private var canUseWorktree: Bool { agent == .claude && isGitRepository }
 
     private var canStart: Bool {
         !folder.isEmpty && (!isLocal || localModel != nil)
@@ -290,6 +297,7 @@ struct NewSessionSheet: View {
 
     private func apply(_ o: LaunchOptions) {
         folder = o.folder
+        agent = o.agent
         isLocal = o.local != nil
         cloudModel = o.model
         localModel = o.local.flatMap { choice in model.lmStudio?.models.first { $0.id == choice.id } }

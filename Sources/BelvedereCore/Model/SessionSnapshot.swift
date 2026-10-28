@@ -4,6 +4,10 @@ public enum AgentKind: String, Codable, Sendable, CaseIterable {
     case claude, codex
 }
 
+extension AgentKind {
+    public var productName: String { self == .claude ? "Claude Code" : "Codex" }
+}
+
 public enum SessionStatus: String, Codable, Sendable {
     case working, waiting, done, idle, ended
 }

@@ -53,9 +53,9 @@ final class AppModel {
     var newSessionFolder: String?
     /// Sessioni passate al terminale da questa esecuzione: osservate, così la vista si aggiorna subito.
     private(set) var handedOff: Set<String> = []
-    /// Cartelle con un `claude` vivo che non è di Belvedere (terminale, IntelliJ…), aggiornate ogni 5 s;
-    /// `nil` finché non sono state lette.
-    private(set) var busyFolders: Set<String>?
+    /// Cartelle con un `claude` o un `codex` vivo che non è di Belvedere (terminale, IntelliJ…),
+    /// aggiornate ogni 5 s; `nil` finché non sono state lette.
+    private(set) var busyFolders: [AgentKind: Set<String>]?
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
@@ -274,8 +274,8 @@ final class AppModel {
         host.resumeBlocker = { [weak self, weak host] in
             guard let self, let host else { return nil }
             let folder = host.state.cwd ?? host.options.folder
-            guard self.claudeFolders().contains(RunningProcesses.canonical(folder)) else { return nil }
-            return "Claude Code è già aperto in questa cartella, ad esempio in un terminale: chiudilo per continuare qui."
+            guard self.agentFolders(host.agent).contains(RunningProcesses.canonical(folder)) else { return nil }
+            return "\(host.agent.productName) è già aperto in questa cartella, ad esempio in un terminale: chiudilo per continuare qui."
         }
         hostedSessions.append(host)
         host.start()
@@ -291,16 +291,16 @@ final class AppModel {
             route = .session(sessionID)
             return
         }
-        let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: .claude)) ?? []
+        let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: s.agent)) ?? []
         launch(LaunchOptions.resuming(s), history: history)
     }
 
     /// «Riprendi in Belvedere» solo se la sessione non è viva altrove: mai due processi sulla stessa sessione.
     func canResumeHere(_ s: SessionSnapshot) -> Bool {
-        guard s.agent == .claude, !s.cwd.isEmpty, !isHosted(s.id) else { return false }
-        // Se nessun `claude` di altri lavora in quella cartella, la sessione non è viva altrove:
+        guard !s.cwd.isEmpty, !isHosted(s.id) else { return false }
+        // Se nessun `claude` (o `codex`) di altri lavora in quella cartella, la sessione non è viva altrove:
         // vale anche dopo un crash (log fermo su «al lavoro») e per le sessioni nate prima di Belvedere.
-        guard let busyFolders, !busyFolders.contains(RunningProcesses.canonical(s.cwd)) else { return false }
+        guard let busy = busyFolders?[s.agent], !busy.contains(RunningProcesses.canonical(s.cwd)) else { return false }
         // Passata al terminale: finché quel processo vive, anche prima dei suoi hook, la sessione è sua.
         let pidFile = Self.handoffPID(s.id)
         // Appena passata il PID può non essere ancora scritto: intanto vale come occupata.
@@ -308,13 +308,13 @@ final class AppModel {
         return !TerminalHandoff.isRunning(pidFile: pidFile)
     }
 
-    /// Cartelle dei `claude` vivi, esclusi quelli lanciati da Belvedere.
-    private func claudeFolders() -> Set<String> {
-        RunningProcesses.folders(named: "claude", excluding: Set(hostedSessions.compactMap(\.pid)))
+    /// Cartelle dei `claude` o `codex` vivi, esclusi quelli lanciati da Belvedere.
+    private func agentFolders(_ agent: AgentKind) -> Set<String> {
+        RunningProcesses.folders(named: agent.rawValue, excluding: Set(hostedSessions.compactMap(\.pid)))
     }
 
     private func refreshBusyFolders() {
-        let folders = claudeFolders()
+        let folders = Dictionary(uniqueKeysWithValues: AgentKind.allCases.map { ($0, agentFolders($0)) })
         if folders != busyFolders { busyFolders = folders }
     }
 
@@ -322,12 +322,12 @@ final class AppModel {
         Belvedere.supportDirectory.appendingPathComponent("handoff/\(id).pid")
     }
 
-    /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume`.
+    /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume` o `codex resume`.
     func openInTerminal(_ sessionID: String) async {
         let host = host(for: sessionID)
         // Senza id (nessun messaggio ancora inviato) non c'è niente da riprendere nel terminale.
         guard let s = host?.state.snapshot(launchedAt: host?.launchedAt) ?? session(sessionID),
-              let binary = host?.binary ?? HostedSession(options: LaunchOptions(folder: "/")).binary else { return }
+              let binary = host?.binary ?? HostedSession(options: LaunchOptions(folder: "/", agent: s.agent)).binary else { return }
         await host?.stop()
         // Da qui la sessione è del terminale: Belvedere la osserva soltanto.
         if let host {
@@ -339,9 +339,15 @@ final class AppModel {
         let url = folder.appendingPathComponent("\(s.id).command")
         // Una sessione locale resta su LM Studio anche nel terminale.
         let options = host.map { $0.options.resuming(s.id, cwd: s.cwd) } ?? LaunchOptions.resuming(s)
-        let local = options.local == nil ? [:] : ClaudeCommand.environment(options, base: [:])
-        let script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
+        let script: String
+        if s.agent == .codex {
+            script = TerminalHandoff.script(cwd: s.cwd, arguments: [binary] + CodexCommand.terminalArguments(options),
+                                            pidFile: Self.handoffPID(s.id).path)
+        } else {
+            let local = options.local == nil ? [:] : ClaudeCommand.environment(options, base: [:])
+            script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
                                             pidFile: Self.handoffPID(s.id).path, environment: local)
+        }
         try? FileManager.default.removeItem(at: Self.handoffPID(s.id))
         handedOff.insert(s.id)
         do {

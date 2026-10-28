@@ -76,10 +76,11 @@ public enum GitInfo {
 
 public enum LaunchAdvice {
     /// Avviso per i modelli locali con contesto piccolo.
-    public static func contextWarning(_ contextLength: Int?) -> String? {
+    public static func contextWarning(_ contextLength: Int?, agent: AgentKind = .claude) -> String? {
         guard let n = contextLength, n < 65_536 else { return nil }
         let formatted = n.formatted(.number.locale(Locale(identifier: "it_IT")))
-        return "Contesto di \(formatted) token: Claude Code ne usa circa 20k solo per istruzioni e strumenti."
+        let overhead = agent == .claude ? "20k" : "9k"
+        return "Contesto di \(formatted) token: \(agent.productName) ne usa circa \(overhead) solo per istruzioni e strumenti."
     }
 }
 

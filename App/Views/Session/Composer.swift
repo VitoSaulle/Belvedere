@@ -35,7 +35,7 @@ struct Composer: View {
 
     private var field: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField("Scrivi a Claude, / per i comandi, @ per i file", text: $text, axis: .vertical)
+            TextField("Scrivi a \(Theme.agentName(host.agent)), / per i comandi, @ per i file", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .lineLimit(1...8)

@@ -52,4 +52,10 @@ import Testing
         #expect(script.hasSuffix("cd '/p' && exec '/opt/homebrew/bin/codex' 'resume' 't1'\n"))
         #expect(script.contains("echo $$ > '/s/t1.pid'"))
     }
+
+    /// Lo spike ha misurato ~9k token di istruzioni e strumenti al primo turno.
+    @Test func contextWarningForCodex() {
+        #expect(LaunchAdvice.contextWarning(32768, agent: .codex) == "Contesto di 32.768 token: Codex ne usa circa 9k solo per istruzioni e strumenti.")
+        #expect(LaunchAdvice.contextWarning(32768, agent: .claude)?.contains("Claude Code ne usa circa 20k") == true)
+    }
 }
