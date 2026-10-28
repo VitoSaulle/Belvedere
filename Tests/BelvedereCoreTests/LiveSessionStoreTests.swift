@@ -104,6 +104,17 @@ import Testing
         #expect(store.sessions.map(\.id) == ["c", "b", "a"])
     }
 
+    @Test func restoredClaudeLimitsAreUsed() {
+        var store = LiveSessionStore()
+        let now = Date()
+        let saved = PlanLimits(fiveHour: LimitWindow(usedPercent: 13, resetsAt: now.addingTimeInterval(3600)),
+                               weekly: nil, observedAt: now.addingTimeInterval(-300))
+        store.apply(claudeLimits: saved)
+        store.tick(now: now)
+        #expect(store.planLimits == saved)
+        #expect(store.claudeLimits == saved)
+    }
+
     @Test func planLimitsPickNewestAndDropExpired() throws {
         var store = LiveSessionStore()
         let now = Date()

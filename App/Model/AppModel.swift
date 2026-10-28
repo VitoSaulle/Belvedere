@@ -38,6 +38,7 @@ final class AppModel {
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
+    static let limitsKey = "lastClaudeLimits"
 
     init(roots: TranscriptRoots = .default,
          policy: PermissionPolicy = PermissionPolicy(storageValue: UserDefaults.standard.string(forKey: AppModel.policyKey))) {
@@ -58,6 +59,11 @@ final class AppModel {
         guard !started else { return }
         started = true
         refreshHooksInstalled()
+        if let data = UserDefaults.standard.data(forKey: Self.limitsKey),
+           let saved = try? JSONDecoder().decode(PlanLimits.self, from: data) {
+            store.apply(claudeLimits: saved)
+            store.tick(now: Date())
+        }
         startServer()
         if !hooksInstalled && !UserDefaults.standard.bool(forKey: Self.welcomeKey) { showWelcome = true }
 
@@ -211,6 +217,9 @@ final class AppModel {
 
     private func ingest(_ payload: StatusLinePayload) {
         store.apply(payload)
+        if let limits = payload.limits, let data = try? JSONEncoder().encode(limits) {
+            UserDefaults.standard.set(data, forKey: Self.limitsKey)
+        }
         publish()
     }
 

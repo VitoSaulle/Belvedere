@@ -26,7 +26,8 @@ public struct LiveSessionStore: Sendable {
     private var hooks: [String: HookState] = [:]
     private var statusLines: [String: StatusLineState] = [:]
     private var codexLimits: PlanLimits?
-    private var claudeLimits: PlanLimits?
+    /// Ultimi limiti letti dalla status line: l'app li salva e li ripristina all'avvio.
+    public private(set) var claudeLimits: PlanLimits?
     private var now: Date = .distantPast
 
     public init() {}
@@ -76,6 +77,10 @@ public struct LiveSessionStore: Sendable {
         advance(to: at)
         statusLines[status.sessionID] = StatusLineState(payload: status, at: at)
         if let limits = status.limits { claudeLimits = limits }
+    }
+
+    public mutating func apply(claudeLimits limits: PlanLimits?) {
+        claudeLimits = limits
     }
 
     public mutating func apply(codexLimits limits: PlanLimits?) {
