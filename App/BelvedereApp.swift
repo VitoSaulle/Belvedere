@@ -45,10 +45,14 @@ struct BelvedereApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
     private var hotKey: GlobalHotKey?
+    private var notch: NotchController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Appearance.current.apply()
         hotKey = GlobalHotKey { [weak self] in self?.showMainWindow() }
+        let notch = NotchController(model: model)
+        notch.start()
+        self.notch = notch
         Task { await model.start() }
     }
 
