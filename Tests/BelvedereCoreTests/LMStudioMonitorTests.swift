@@ -29,6 +29,14 @@ final class FakeLMStudio: URLProtocol, @unchecked Sendable {
 }
 
 @Suite(.serialized) struct LMStudioMonitorTests {
+    /// Un modello caricato usa il contesto scelto al caricamento, non il massimo del modello.
+    @Test func prefersLoadedContextLength() async {
+        FakeLMStudio.offline = false
+        FakeLMStudio.routes = ["/api/v0/models": (200, #"{"data":[{"id":"qwen","state":"loaded","max_context_length":262144,"loaded_context_length":32768}]}"#)]
+        let status = await LMStudioMonitor(session: FakeLMStudio.session).poll()
+        #expect(status.models == [LMStudioModel(id: "qwen", loaded: true, contextLength: 32768)])
+    }
+
     @Test func readsNativeAPI() async {
         FakeLMStudio.offline = false
         FakeLMStudio.routes = ["/api/v0/models": (200, #"{"data":[{"id":"qwen3-coder-30b","state":"loaded","max_context_length":65536},{"id":"gemma","state":"not-loaded","max_context_length":8192}]}"#)]

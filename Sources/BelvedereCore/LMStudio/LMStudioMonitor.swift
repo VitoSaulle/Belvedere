@@ -26,7 +26,7 @@ public actor LMStudioMonitor {
     public func poll() async -> LMStudioStatus {
         if let data = await get("/api/v0/models") {
             return LMStudioStatus(reachable: true, models: Self.models(data) { item in
-                (item["state"] as? String == "loaded", (item["max_context_length"] as? NSNumber)?.intValue)
+                (item["state"] as? String == "loaded", ((item["loaded_context_length"] ?? item["max_context_length"]) as? NSNumber)?.intValue)
             })
         }
         if let data = await get("/v1/models") {
