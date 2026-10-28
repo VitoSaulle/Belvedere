@@ -162,9 +162,11 @@ public actor TranscriptIndex {
         return rivals.allSatisfy { mine.mtime > $0.value.mtime || (mine.mtime == $0.value.mtime && path < $0.key) }
     }
 
-    /// Lo snapshot con il profilo della radice che contiene il file.
+    /// Lo snapshot con il profilo della radice che contiene il file e il percorso attuale
+    /// (una voce spostata da un trasferimento ricorda quello di origine).
     private func output(_ path: String, _ entry: Entry) -> SessionSnapshot {
         var snapshot = entry.reducer.snapshot
+        snapshot.transcriptPath = path
         snapshot.profileID = roots.root(containing: path)?.profileID
         return snapshot
     }

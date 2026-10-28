@@ -345,6 +345,7 @@ extension TranscriptIndexTests {
         let (index, t, total) = try await transferFixture()
         let begun = await index.beginTransfer(t)
         #expect(begun.changed.first { $0.id == "s1" }?.profileID == Self.pB)
+        #expect(begun.changed.first { $0.id == "s1" }?.transcriptPath == t.copiedPaths[0])
         _ = await index.refreshAll(progress: nil)
         #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pB])
         #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)

@@ -8,6 +8,8 @@ final class HostedSession: Identifiable {
     let id = UUID()
     private(set) var state: ChatState
     private(set) var options: LaunchOptions
+    /// Account con cui gira il processo: `CLAUDE_CONFIG_DIR` o `CODEX_HOME` per i profili non predefiniti.
+    let profile: Profile?
     private(set) var isRunning = false
     let launchedAt = Date()
 
@@ -23,8 +25,9 @@ final class HostedSession: Identifiable {
     /// Il dialogo JSON-RPC, solo per le sessioni Codex.
     @ObservationIgnored private var codex: CodexConversation?
 
-    init(options: LaunchOptions, history: [TranscriptItem] = []) {
+    init(options: LaunchOptions, profile: Profile? = nil, history: [TranscriptItem] = []) {
         self.options = options
+        self.profile = profile
         let local = options.local != nil
         state = options.resumeID.map {
             ChatState(agent: options.agent, isLocal: local, history: history, resuming: $0, folder: options.folder)
@@ -59,7 +62,9 @@ final class HostedSession: Identifiable {
         let args = agent == .claude
             ? ClaudeCommand.arguments(options, isGitRepository: GitInfo.isRepository(options.folder))
             : CodexCommand.arguments
-        let env = agent == .claude ? ClaudeCommand.environment(options, base: base) : base
+        let env = agent == .claude
+            ? ClaudeCommand.environment(options, base: base, profile: profile)
+            : CodexCommand.environment(base: base, profile: profile)
         let process = StreamProcess(executable: binary, arguments: args, environment: env, directory: options.folder)
         do {
             let events = try process.start()
