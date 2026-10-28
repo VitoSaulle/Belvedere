@@ -505,7 +505,10 @@ final class AppModel {
     }
 
     private func pollLMStudio() async {
-        lmStudio = await lmMonitor.poll()
+        let status = await lmMonitor.poll()
+        guard status != lmStudio else { return }
+        lmStudio = status
+        publish()
     }
 
     private func saveIndex() async {
@@ -513,7 +516,7 @@ final class AppModel {
     }
 
     private func publish() {
-        let next = store.sessions
+        let next = LMStudioModel.applyLoadedContext(to: store.sessions, models: lmStudio?.models ?? [])
         if feedReady { addToFeed(ActivityFeed.events(from: allSessions, to: next, now: Date())) }
         if next != allSessions { allSessions = next }
         let visible = next.filter { !hidden.isHidden($0) }
