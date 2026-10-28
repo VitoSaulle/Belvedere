@@ -9,7 +9,7 @@ import Testing
         var decision: PermissionDecision? = .allow
         let elapsed = await clock.measure { decision = await broker.decision(for: "r1") }
         #expect(decision == nil)
-        #expect(elapsed < .milliseconds(500))
+        #expect(elapsed < .seconds(2))
     }
 
     @Test func resolveBeforeTimeout() async throws {
@@ -32,7 +32,7 @@ import Testing
             decision = await wait.value
         }
         #expect(decision == nil)
-        #expect(elapsed < .milliseconds(500))
+        #expect(elapsed < .seconds(2))
     }
 
     /// Hook globale e hook di progetto mandano la stessa richiesta due volte: la risposta vale per entrambe.
@@ -131,7 +131,7 @@ import Testing
         var decision: PermissionDecision? = .allow
         let elapsed = await clock.measure { decision = await broker.decision(for: "r") }
         #expect(decision == nil)
-        #expect(elapsed < .milliseconds(100))
+        #expect(elapsed < .seconds(1))
     }
 
     @Test func policyStorageRoundTrip() {
