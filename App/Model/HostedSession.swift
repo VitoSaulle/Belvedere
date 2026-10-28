@@ -73,12 +73,15 @@ final class HostedSession: Identifiable {
                 conversation.begin().forEach { try? process.send($0) }
                 codex = conversation
             }
+            let incoming = Self.decoded(events, agent: agent)
             reader = Task { [weak self] in
-                for await event in events {
+                for await event in incoming {
                     guard let self else { return }
                     switch event {
-                    case .line(let data):
-                        self.receive(data)
+                    case .claude(let message):
+                        self.state.apply(message, now: Date())
+                    case .codex(let message, let thread):
+                        self.receive(message, thread: thread)
                     case .exited(let code, let stderr):
                         self.isRunning = false
                         self.state.processExited(code: code, stderr: stderr, now: Date())
@@ -92,14 +95,38 @@ final class HostedSession: Identifiable {
         changed()
     }
 
-    private func receive(_ data: Data) {
-        guard var conversation = codex else {
-            state.apply(StreamMessage.decode(data), now: Date())
-            return
-        }
-        let replies = conversation.receive(line: data, state: &state, now: Date())
+    private func receive(_ message: CodexMessage, thread: String?) {
+        guard var conversation = codex else { return }
+        let replies = conversation.receive(message, thread: thread, state: &state, now: Date())
         codex = conversation
         replies.forEach(write)
+    }
+
+    /// Righe già decodificate: il JSON (anche righe grandi, come gli esiti degli strumenti) si legge
+    /// fuori dal main actor.
+    private enum Incoming: Sendable {
+        case claude(StreamMessage)
+        case codex(CodexMessage, thread: String?)
+        case exited(code: Int32, stderr: String)
+    }
+
+    private nonisolated static func decoded(_ events: AsyncStream<StreamProcess.Event>, agent: AgentKind) -> AsyncStream<Incoming> {
+        let (stream, continuation) = AsyncStream<Incoming>.makeStream()
+        let task = Task.detached {
+            for await event in events {
+                switch event {
+                case .line(let data):
+                    continuation.yield(agent == .claude
+                        ? .claude(StreamMessage.decode(data))
+                        : .codex(CodexMessage.decode(data), thread: CodexMessage.thread(of: data)))
+                case .exited(let code, let stderr):
+                    continuation.yield(.exited(code: code, stderr: stderr))
+                }
+            }
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
     }
 
     /// Passa un'azione al dialogo Codex e scrive le righe che produce.

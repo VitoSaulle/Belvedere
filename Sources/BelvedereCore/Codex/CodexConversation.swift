@@ -131,8 +131,12 @@ public struct CodexConversation: Sendable {
     /// Una riga così come arriva: quelle dei thread lasciati con `/clear` restano fuori dalla chat,
     /// e le loro richieste si rifiutano perché il turno non resti fermo.
     public mutating func receive(line: Data, state: inout ChatState, now: Date) -> [Data] {
-        let message = CodexMessage.decode(line)
-        guard let thread = CodexMessage.thread(of: line), abandoned.contains(thread) else {
+        receive(CodexMessage.decode(line), thread: CodexMessage.thread(of: line), state: &state, now: now)
+    }
+
+    /// Come `receive(line:)`, con la riga già decodificata fuori dal main actor.
+    public mutating func receive(_ message: CodexMessage, thread: String?, state: inout ChatState, now: Date) -> [Data] {
+        guard let thread, abandoned.contains(thread) else {
             return receive(message, state: &state, now: now)
         }
         guard case .request(let id, let method, _) = message else { return [] }
