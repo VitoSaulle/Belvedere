@@ -418,6 +418,13 @@ final class AppModel {
         if let data = try? JSONEncoder().encode(presets) { UserDefaults.standard.set(data, forKey: "launchPresets") }
     }
 
+    /// «Belvedere» come origine quando i hook non l'hanno ancora detta: solo se la sessione è ospitata adesso
+    /// o è ferma. Una sessione lanciata qui una volta e ora al lavoro altrove gira nel terminale.
+    func launchedHere(_ s: SessionSnapshot) -> Bool {
+        guard launchedIDs.contains(s.id) else { return false }
+        return host(for: s.id) != nil || (s.status != .working && s.status != .waiting)
+    }
+
     private func hostChanged(_ host: HostedSession) {
         if let id = host.state.sessionID {
             if !launchedIDs.contains(id) {

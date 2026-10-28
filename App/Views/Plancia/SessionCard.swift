@@ -82,7 +82,7 @@ struct SessionCard: View {
             }
             if let origin = session.origin {
                 Tag(text: origin.appName)
-            } else if model.launchedIDs.contains(session.id) {
+            } else if model.launchedHere(session) {
                 Tag(text: "Belvedere")
             }
         }

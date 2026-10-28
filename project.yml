@@ -29,6 +29,27 @@ targets:
         INFOPLIST_FILE: App/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # Cartella degli helper compilati con SwiftPM (release.sh la passa per la build universale).
+        HELPERS_DIR: $(SRCROOT)/.build/release
+      configs:
+        # Distribuzione fuori dallo Store: firma del team, hardened runtime per la notarizzazione.
+        Release:
+          DEVELOPMENT_TEAM: 94BHT7B4R9
+          CODE_SIGN_STYLE: Automatic
+          CODE_SIGN_IDENTITY: Apple Development
+          ENABLE_HARDENED_RUNTIME: YES
+    postBuildScripts:
+      - name: Helper
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          D="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers"
+          mkdir -p "$D"
+          for h in belvedere-hook belvedere-statusline; do
+            cp "$HELPERS_DIR/$h" "$D/$h"
+            codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY:--}" -o runtime "$D/$h"
+          done
 schemes:
   Belvedere:
     build:

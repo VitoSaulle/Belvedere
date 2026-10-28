@@ -5,6 +5,7 @@ import BelvedereCore
 @main
 struct BelvedereApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
 
     var body: some Scene {
         Window("Belvedere", id: "main") {
@@ -24,6 +25,12 @@ struct BelvedereApp: App {
                 Button("Statistiche") { delegate.model.route = .stats }
                     .keyboardShortcut("s", modifiers: [.command, .option])
                 Button("Plugin di Claude Code…") { delegate.model.showPlugins = true }
+                Divider()
+                Picker("Aspetto", selection: Binding(get: { appearance }, set: { setAppearance(Appearance(rawValue: $0) ?? .system) })) {
+                    ForEach(Appearance.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                Button("Passa al tema chiaro o scuro") { setAppearance(Appearance.isDark ? .light : .dark) }
+                    .keyboardShortcut("l", modifiers: [.command, .shift])
             }
         }
         Settings {
@@ -119,12 +126,24 @@ enum Appearance: String, CaseIterable, Identifiable {
         }
     }
 
+    /// L'aspetto in uso adesso, anche quando segue il sistema.
+    @MainActor static var isDark: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
     @MainActor func apply() {
         switch self {
         case .system: NSApp.appearance = nil
         case .light: NSApp.appearance = NSAppearance(named: .aqua)
         case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
         }
+    }
+}
+
+extension BelvedereApp {
+    private func setAppearance(_ value: Appearance) {
+        appearance = value.rawValue
+        value.apply()
     }
 }
 

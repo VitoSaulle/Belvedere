@@ -33,7 +33,7 @@ struct SessionInspector: View {
                         row("Cache letta", Fmt.tokens(s.tokens.cacheRead))
                         row("Costo stimato", s.costUSD.map(Fmt.usd) ?? "—")
                         row("Durata", duration(s))
-                        row("Origine", s.origin?.appName ?? (model.launchedIDs.contains(s.id) ? "Belvedere" : "sconosciuta"))
+                        row("Origine", s.origin?.appName ?? (model.launchedHere(s) ? "Belvedere" : "sconosciuta"))
                         if let model = s.model { row("Modello", ModelInfo.displayName(model)) }
                     }
 

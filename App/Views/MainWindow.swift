@@ -22,6 +22,9 @@ struct MainWindow: View {
                 .animation(.smooth(duration: 0.3), value: model.route)
                 .navigationTitle("")
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) { AppearanceMenu() }
+                }
         }
         .frame(minWidth: 980, minHeight: 620)
         .sheet(isPresented: $model.showWelcome) {
@@ -65,6 +68,35 @@ struct MainWindow: View {
                 }
         case .stats:
             StatsView()
+        }
+    }
+}
+
+/// Tema dell'app a portata di clic: come il sistema, chiaro o scuro.
+private struct AppearanceMenu: View {
+    @AppStorage(Appearance.key) private var appearance = Appearance.system.rawValue
+
+    var body: some View {
+        Menu {
+            Picker("Tema", selection: Binding(get: { appearance }, set: { value in
+                appearance = value
+                (Appearance(rawValue: value) ?? .system).apply()
+            })) {
+                ForEach(Appearance.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("Tema", systemImage: symbol)
+        }
+        .menuIndicator(.hidden)
+        .help("Tema: come il sistema, chiaro o scuro (⇧⌘L per alternare)")
+    }
+
+    private var symbol: String {
+        switch Appearance(rawValue: appearance) ?? .system {
+        case .system: "circle.lefthalf.filled"
+        case .light: "sun.max"
+        case .dark: "moon"
         }
     }
 }
