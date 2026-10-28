@@ -96,12 +96,15 @@ import Testing
     }
 
     @Test func oldTimerDoesNotCloseANewWait() async throws {
-        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 0.3))
+        // Margini larghi: sui runner di GitHub i sonni possono sforare di qualche centinaio di ms.
+        // Il timer del primo scade a 2 s (con il secondo già in attesa), la risposta arriva a ~2,3 s,
+        // il timer del secondo scadrebbe a 3 s.
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 2))
         async let first = broker.decision(for: "r1")
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(for: .milliseconds(1000))
         async let second = broker.decision(for: "r1")
         #expect(await first == nil)
-        try await Task.sleep(for: .milliseconds(150))
+        try await Task.sleep(for: .milliseconds(300))
         await broker.resolve(requestID: "r1", with: .allow)
         #expect(await second == .allow)
     }
