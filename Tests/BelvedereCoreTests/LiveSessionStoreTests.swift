@@ -114,6 +114,16 @@ import Testing
         #expect(state.snapshot(launchedAt: nil)?.isLocalModel == true)
     }
 
+    /// Anche una sessione locale vista solo dal log (`cost-state` scritto dalla CLI) non ha un costo.
+    @Test func localSessionFromLogHasNoCost() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .done)
+        log.isLocalModel = true
+        log.costUSD = 0.12
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        #expect(try #require(store.sessions.first).costUSD == nil)
+    }
+
     @Test func hostedOverlayWins() throws {
         var store = LiveSessionStore()
         var log = logSnapshot(status: .done)
@@ -279,22 +289,25 @@ import Testing
                                weekly: nil, observedAt: now.addingTimeInterval(-300))
         store.apply(claudeLimits: saved)
         store.tick(now: now)
-        #expect(store.planLimits == saved)
+        #expect(store.planLimits(.claude) == saved)
         #expect(store.claudeLimits == saved)
     }
 
-    @Test func planLimitsPickNewestAndDropExpired() throws {
+    /// Claude e Codex sono due piani diversi: i limiti restano separati, anche se quelli di Codex sono più recenti.
+    @Test func planLimitsStaySeparateAndDropExpired() throws {
         var store = LiveSessionStore()
         let now = Date()
         store.apply(codexLimits: PlanLimits(fiveHour: LimitWindow(usedPercent: 10, resetsAt: now.addingTimeInterval(3600)),
-                                            weekly: nil, observedAt: now.addingTimeInterval(-600)))
-        #expect(store.planLimits?.fiveHour?.usedPercent == 10)
+                                            weekly: nil, observedAt: now))
+        #expect(store.planLimits(.claude) == nil)
+        #expect(store.planLimits(.codex)?.fiveHour?.usedPercent == 10)
         let json = #"{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":62,"resets_at":\#(Int(now.timeIntervalSince1970) - 10)},"seven_day":{"used_percentage":30,"resets_at":\#(Int(now.timeIntervalSince1970) + 86400)}}}"#
-        store.apply(try StatusLinePayload.decode(Data(json.utf8), now: now))
+        store.apply(try StatusLinePayload.decode(Data(json.utf8), now: now.addingTimeInterval(-60)))
         store.tick(now: now)
-        let limits = try #require(store.planLimits)
+        let limits = try #require(store.planLimits(.claude))
         #expect(limits.fiveHour == nil)
         #expect(limits.weekly?.usedPercent == 30)
+        #expect(store.planLimits(.codex)?.fiveHour?.usedPercent == 10)
     }
 }
 

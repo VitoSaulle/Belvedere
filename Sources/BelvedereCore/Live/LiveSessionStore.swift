@@ -161,9 +161,9 @@ public struct LiveSessionStore: Sendable {
 
     public var waitingCount: Int { sessions.filter { $0.status == .waiting }.count }
 
-    public var planLimits: PlanLimits? {
-        let newest = [claudeLimits, codexLimits].compactMap { $0 }.max { $0.observedAt < $1.observedAt }
-        guard var limits = newest else { return nil }
+    /// Limiti del piano di un agente, senza le finestre già azzerate.
+    public func planLimits(_ agent: AgentKind) -> PlanLimits? {
+        guard var limits = agent == .claude ? claudeLimits : codexLimits else { return nil }
         let isExpired = { (w: LimitWindow?) in w?.resetsAt.map { $0 < now } ?? false }
         if isExpired(limits.fiveHour) { limits.fiveHour = nil }
         if isExpired(limits.weekly) { limits.weekly = nil }
@@ -236,11 +236,12 @@ public struct LiveSessionStore: Sendable {
             if let window = live.contextWindow { s.contextWindow = window }
             if let cost = live.costUSD { s.costUSD = cost }
             if live.isLocalModel { s.isLocalModel = true }
-            if s.isLocalModel { s.costUSD = nil }
             if let text = live.lastText { s.lastText = text }
             if s.cwd.isEmpty { s.cwd = live.cwd }
             if (s.lastActivity ?? .distantPast) < (live.lastActivity ?? .distantPast) { s.lastActivity = live.lastActivity }
         }
+        // La CLI calcola il costo con i prezzi di Claude anche per un modello locale: non è un costo.
+        if s.isLocalModel { s.costUSD = nil }
         return s
     }
 

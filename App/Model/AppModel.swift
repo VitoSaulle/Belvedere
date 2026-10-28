@@ -10,7 +10,9 @@ final class AppModel {
     /// Tutte le sessioni, nascoste comprese: statistiche e apertura per id.
     private(set) var allSessions: [SessionSnapshot] = []
     private(set) var hidden = HiddenSessions()
+    /// Limiti del piano Claude; quelli di Codex sono di un altro piano e restano a parte.
     var planLimits: PlanLimits?
+    var codexLimits: PlanLimits?
     var lmStudio: LMStudioStatus?
     var feed: [ActivityEvent] = []
     var indexingProgress: Double?
@@ -568,8 +570,10 @@ final class AppModel {
         if next != allSessions { allSessions = next }
         let visible = next.filter { !hidden.isHidden($0) }
         if visible != sessions { sessions = visible }
-        let limits = store.planLimits
+        let limits = store.planLimits(.claude)
         if limits != planLimits { planLimits = limits }
+        let codex = store.planLimits(.codex)
+        if codex != codexLimits { codexLimits = codex }
     }
 
     private func addToFeed(_ events: [ActivityEvent]) {
