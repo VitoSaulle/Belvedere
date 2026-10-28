@@ -321,4 +321,49 @@ extension TranscriptIndexTests {
         #expect(await index.latestCodexLimits(profile: Self.pX)?.fiveHour?.usedPercent == 21)
         #expect(await index.latestCodexLimits(profile: Self.pY) == nil)
     }
+
+    private func transferFixture() async throws -> (TranscriptIndex, PendingTransfer, Int) {
+        _ = seed()
+        _ = tmp.file("claude/-Users-v-proj/s1/subagents/agent-a1.jsonl", #"{"type":"assistant","sessionId":"s1","cwd":"/Users/v/proj","timestamp":"2026-10-28T09:30:00.000Z","message":{"id":"sub1","model":"claude-haiku-5-5","stop_reason":"end_turn","content":[],"usage":{"input_tokens":7,"output_tokens":3}}}"# + "\n")
+        let index = TranscriptIndex(roots: profileRoots(), cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let total = await index.buckets.reduce(0) { $0 + $1.tokens.total }
+        // Le radici dei test non finiscono in `projects`: i percorsi si calcolano a mano.
+        let src = tmp.url.appendingPathComponent("claude/-Users-v-proj").standardizedFileURL
+        let dst = tmp.url.appendingPathComponent("claude2/-Users-v-proj").standardizedFileURL
+        try FileManager.default.createDirectory(at: dst, withIntermediateDirectories: true)
+        for name in ["s1.jsonl", "s1"] {
+            try FileManager.default.copyItem(at: src.appendingPathComponent(name), to: dst.appendingPathComponent(name))
+        }
+        let t = PendingTransfer(sessionID: "s1", agent: .claude, from: Self.pA, to: Self.pB,
+                                sourcePaths: [src.appendingPathComponent("s1.jsonl").path, src.appendingPathComponent("s1").path],
+                                copiedPaths: [dst.appendingPathComponent("s1.jsonl").path, dst.appendingPathComponent("s1").path])
+        return (index, t, total)
+    }
+
+    @Test func transferDoesNotDoubleCount() async throws {
+        let (index, t, total) = try await transferFixture()
+        let begun = await index.beginTransfer(t)
+        #expect(begun.changed.first { $0.id == "s1" }?.profileID == Self.pB)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pB])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+        for path in t.sourcePaths { try FileManager.default.removeItem(atPath: path) }
+        _ = await index.endTransfer(t, confirmed: true)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pB])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
+
+    @Test func rollbackRestoresSource() async throws {
+        let (index, t, total) = try await transferFixture()
+        _ = await index.beginTransfer(t)
+        _ = await index.refreshAll(progress: nil)
+        for path in t.copiedPaths { try FileManager.default.removeItem(atPath: path) }
+        let ended = await index.endTransfer(t, confirmed: false)
+        #expect(ended.changed.first { $0.id == "s1" }?.profileID == Self.pA)
+        _ = await index.refreshAll(progress: nil)
+        #expect(await index.sessions.filter { $0.id == "s1" }.map(\.profileID) == [Self.pA])
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.total } == total)
+    }
 }

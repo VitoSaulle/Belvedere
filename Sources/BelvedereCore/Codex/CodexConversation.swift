@@ -196,6 +196,7 @@ public struct CodexConversation: Sendable {
             default:
                 if state.lastError?.hasSuffix(Self.retrySuffix) == true { state.lastError = nil }
                 state.status = state.asks.isEmpty ? .done : .waiting
+                state.completedTurns += 1
             }
         case .itemStarted(let item):
             if item["type"]?.stringValue == "agentMessage" { state.streaming = state.streaming ?? "" }

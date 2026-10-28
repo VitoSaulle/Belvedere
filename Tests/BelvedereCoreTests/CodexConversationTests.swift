@@ -81,6 +81,15 @@ import Testing
         #expect(state.status == .done)
     }
 
+    @Test func completedTurnsOnCompleted() {
+        var (c, state) = ready()
+        for status in ["failed", "interrupted", "completed"] {
+            _ = c.receive(.turnStarted(turnID: "u1"), state: &state, now: now)
+            _ = c.receive(.turnCompleted(turnID: "u1", status: status, error: nil), state: &state, now: now)
+        }
+        #expect(state.completedTurns == 1)
+    }
+
     @Test func interruptSendsTurnAndEndsIdle() {
         var (c, state) = ready()
         _ = c.receive(.turnStarted(turnID: "u1"), state: &state, now: now)

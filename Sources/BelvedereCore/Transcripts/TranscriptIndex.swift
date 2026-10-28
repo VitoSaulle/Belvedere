@@ -107,6 +107,8 @@ public actor TranscriptIndex {
     private var roots: TranscriptRoots
     private let cacheURL: URL
     private var entries: [String: Entry] = [:]
+    /// Origini di trasferimenti in corso: ignorate finché la conversazione non risponde nel nuovo profilo.
+    private var ignored: Set<String> = []
     private var bucketTable: [String: UsageBucket] = [:]
 
     public init(roots: TranscriptRoots, cacheURL: URL) {
@@ -294,6 +296,49 @@ public actor TranscriptIndex {
         return deleted
     }
 
+    // MARK: - Trasferimenti
+
+    /// La conversazione passa al profilo di destinazione: le voci (offset e riduttore) si spostano
+    /// sui file copiati, così niente viene riletto o contato due volte, e l'origine si ignora.
+    public func beginTransfer(_ t: PendingTransfer) -> IndexUpdate {
+        loadIfNeeded()
+        ignored.formUnion(t.sourcePaths)
+        move(from: t.sourcePaths, to: t.copiedPaths)
+        return update(for: t.copiedPaths[0])
+    }
+
+    /// Chiude il trasferimento. Confermato: le voci dell'origine non servono più. Annullato: tornano all'origine.
+    public func endTransfer(_ t: PendingTransfer, confirmed: Bool) -> IndexUpdate {
+        loadIfNeeded()
+        ignored.subtract(t.sourcePaths)
+        if confirmed {
+            for path in Array(entries.keys) where Self.isUnder(path, any: t.sourcePaths) { entries.removeValue(forKey: path) }
+            dirty = true
+            return update(for: t.copiedPaths[0])
+        }
+        move(from: t.copiedPaths, to: t.sourcePaths)
+        return update(for: t.sourcePaths[0])
+    }
+
+    private func move(from sources: [String], to targets: [String]) {
+        for (src, dst) in zip(sources, targets) {
+            for path in Array(entries.keys) where path == src || path.hasPrefix(src + "/") {
+                guard let entry = entries.removeValue(forKey: path) else { continue }
+                entries[dst + path.dropFirst(src.count)] = entry
+            }
+        }
+        dirty = true
+    }
+
+    private func update(for path: String) -> IndexUpdate {
+        guard let entry = entries[path] else { return IndexUpdate(changed: [], newBuckets: []) }
+        return IndexUpdate(changed: [output(path, entry)], newBuckets: [])
+    }
+
+    private static func isUnder(_ path: String, any roots: [String]) -> Bool {
+        roots.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
+
     public func save() async throws {
         guard dirty else { return }
         try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -318,6 +363,7 @@ public actor TranscriptIndex {
     private func classify(_ url: URL) -> Kind? {
         guard url.pathExtension == "jsonl" else { return nil }
         let path = url.standardizedFileURL.path
+        if !ignored.isEmpty, Self.isUnder(path, any: Array(ignored)) { return nil }
         for root in roots.roots {
             guard let rel = TranscriptRoots.relative(path, to: root.url) else { continue }
             switch root.agent {

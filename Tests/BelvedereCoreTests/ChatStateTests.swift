@@ -161,6 +161,19 @@ import Testing
         #expect(state.errorDetail == nil)
     }
 
+
+    /// Il trasferimento a un altro profilo si conferma alla prima risposta riuscita.
+    @Test func completedTurnsCountsOnlySuccess() {
+        var state = ChatState()
+        let success = Data(#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#.utf8)
+        let failure = Data(#"{"type":"result","subtype":"success","is_error":true,"result":"Invalid API key · Please run /login"}"#.utf8)
+        state.userSent("ciao", now: now)
+        state.apply(StreamMessage.decode(failure), now: now)
+        #expect(state.completedTurns == 0)
+        state.userSent("ciao", now: now)
+        state.apply(StreamMessage.decode(success), now: now)
+        #expect(state.completedTurns == 1)
+    }
     /// Un messaggio scritto durante un turno parte subito dopo: niente «conclusa» in mezzo.
     @Test func queuedMessageKeepsWorkingBetweenTurns() {
         var state = ChatState()
