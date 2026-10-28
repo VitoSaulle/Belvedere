@@ -161,6 +161,28 @@ import Testing
         #expect(state.errorDetail == nil)
     }
 
+    /// Un messaggio scritto durante un turno parte subito dopo: niente «conclusa» in mezzo.
+    @Test func queuedMessageKeepsWorkingBetweenTurns() {
+        var state = ChatState()
+        let success = Data(#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#.utf8)
+        state.userSent("poesia", now: now)
+        state.userSent("DUE", now: now)
+        state.apply(StreamMessage.decode(success), now: now)
+        #expect(state.status == .working)
+        state.apply(StreamMessage.decode(success), now: now)
+        #expect(state.status == .done)
+    }
+
+    /// Dopo «Ferma» la CLI esegue comunque i messaggi in coda.
+    @Test func queuedMessageRunsAfterInterrupt() {
+        var state = ChatState()
+        let interrupted = Data(#"{"type":"result","subtype":"error_during_execution","is_error":true}"#.utf8)
+        state.userSent("poesia", now: now)
+        state.userSent("DUE", now: now)
+        state.apply(StreamMessage.decode(interrupted), now: now)
+        #expect(state.status == .working)
+    }
+
     @Test func cleanExitHasNoError() {
         var state = ChatState()
         state.processExited(code: 0, stderr: "", now: now)

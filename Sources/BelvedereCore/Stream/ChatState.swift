@@ -25,6 +25,9 @@ public struct ChatState: Sendable {
     /// Le righe utili dell'errore; `errorDetail` ha il testo completo quando è stato accorciato.
     public var lastError: String? { didSet { errorDetail = nil } }
     public var errorDetail: String?
+    /// Un messaggio scritto mentre Claude lavorava: la CLI lo esegue dopo il `result` del turno in corso
+    /// (anche dopo un'interruzione), unendo in un turno solo tutti quelli in coda.
+    var queuedTurn = false
     public var lastActivity: Date?
 
     public init(agent: AgentKind = .claude, isLocal: Bool = false, history: [TranscriptItem] = []) {
@@ -94,7 +97,10 @@ public struct ChatState: Sendable {
             if let cost = result.costUSD { costUSD = cost }
             if let tokens = result.contextTokens, tokens > 0 { contextTokens = tokens }
             if let window = result.contextWindow { contextWindow = window }
-            if result.subtype == "error_during_execution" {
+            if queuedTurn {
+                queuedTurn = false
+                status = asks.isEmpty ? .working : .waiting
+            } else if result.subtype == "error_during_execution" {
                 if status != .idle { status = .idle }
             } else {
                 status = asks.isEmpty ? .done : .waiting
@@ -108,6 +114,7 @@ public struct ChatState: Sendable {
     }
 
     public mutating func userSent(_ text: String, now: Date) {
+        if status == .working || status == .waiting { queuedTurn = true }
         items.append(.user(id: "local-\(UUID().uuidString)", text: text))
         status = asks.isEmpty ? .working : .waiting
         lastError = nil
@@ -116,6 +123,7 @@ public struct ChatState: Sendable {
 
     /// Il messaggio non è arrivato a Claude (processo assente o chiuso): niente «al lavoro».
     public mutating func sendFailed(_ error: String, now: Date) {
+        queuedTurn = false
         streaming = nil
         asks = []
         status = .ended
@@ -129,6 +137,7 @@ public struct ChatState: Sendable {
     }
 
     public mutating func processExited(code: Int32, stderr: String, now: Date) {
+        queuedTurn = false
         streaming = nil
         asks = []
         status = .ended
