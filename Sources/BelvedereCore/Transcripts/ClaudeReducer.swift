@@ -167,7 +167,7 @@ public struct ClaudeReducer: TranscriptReducer {
         return ""
     }
 
-    private static func lineCount(_ value: Any?) -> Int {
+    static func lineCount(_ value: Any?) -> Int {
         guard let text = value as? String, !text.isEmpty else { return 0 }
         return text.split(separator: "\n", omittingEmptySubsequences: false).count
     }

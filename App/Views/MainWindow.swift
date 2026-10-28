@@ -19,6 +19,9 @@ struct MainWindow: View {
         } detail: {
             detail
                 .background(Backdrop())
+                .animation(.smooth(duration: 0.3), value: model.route)
+                .navigationTitle("")
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         }
         .frame(minWidth: 980, minHeight: 620)
     }
@@ -38,21 +41,21 @@ struct MainWindow: View {
                     }
                 }
         case .session(let id):
-            SessionPlaceholder(sessionID: id)
+            SessionView(sessionID: id)
+                .id(id)
+                .transition(.scale(scale: 0.96).combined(with: .opacity))
+                .inspector(isPresented: $showInspector) {
+                    SessionInspector(sessionID: id)
+                        .inspectorColumnWidth(min: 260, ideal: 300, max: 360)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { showInspector.toggle() } label: { Label("Dettagli", systemImage: "sidebar.right") }
+                            .help("Mostra o nascondi i dettagli")
+                    }
+                }
         case .stats:
             ContentUnavailableView("Statistiche", systemImage: "chart.bar.xaxis", description: Text("In arrivo."))
         }
-    }
-}
-
-/// Segnaposto della vista sessione, sostituito nel Task 13.
-struct SessionPlaceholder: View {
-    @Environment(AppModel.self) private var model
-    let sessionID: String
-
-    var body: some View {
-        Text(model.session(sessionID)?.displayName ?? sessionID)
-            .font(.title2.weight(.semibold))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
