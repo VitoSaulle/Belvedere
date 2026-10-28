@@ -42,7 +42,7 @@ public enum ClaudeCommand {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private static func quoteIfNeeded(_ s: String) -> String {
+    static func quoteIfNeeded(_ s: String) -> String {
         s.allSatisfy { $0.isLetter || $0.isNumber || "-_./:=@".contains($0) } ? s : quote(s)
     }
 
@@ -89,10 +89,16 @@ public enum TerminalHandoff {
     /// `environment` porta le variabili di un modello locale, così la sessione non passa al cloud.
     public static func script(cwd: String, sessionID: String, binary: String, pidFile: String,
                               environment: [String: String] = [:]) -> String {
+        script(cwd: cwd, arguments: [binary, "--resume", sessionID], pidFile: pidFile, environment: environment)
+    }
+
+    /// Come sopra, con la riga di comando completa (`codex resume <id>` per Codex).
+    public static func script(cwd: String, arguments: [String], pidFile: String,
+                              environment: [String: String] = [:]) -> String {
         let exports = environment.sorted { $0.key < $1.key }
             .map { "export \($0.key)=\(ClaudeCommand.quote($0.value))\n" }.joined()
         return "#!/bin/zsh\necho $$ > \(ClaudeCommand.quote(pidFile))\n" + exports
-            + "cd \(ClaudeCommand.quote(cwd)) && exec \(ClaudeCommand.quote(binary)) --resume \(ClaudeCommand.quote(sessionID))\n"
+            + "cd \(ClaudeCommand.quote(cwd)) && exec \(arguments.map(ClaudeCommand.quote).joined(separator: " "))\n"
     }
 
     /// Il processo aperto dallo script è ancora vivo (anche se fermo su una domanda del terminale).

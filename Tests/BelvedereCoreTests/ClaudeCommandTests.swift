@@ -117,7 +117,7 @@ import Testing
         #expect(script.hasPrefix("#!/bin/zsh\n"))
         #expect(script.contains("echo $$ > '/s/abc.pid'"))
         #expect(script.contains("cd '/p/l'\\''app'"))
-        #expect(script.contains("exec '/opt/homebrew/bin/claude' --resume 'abc'"))
+        #expect(script.contains("exec '/opt/homebrew/bin/claude' '--resume' 'abc'"))
     }
 
     @Test func handoffIsRunningWhileItsProcessLives() throws {
