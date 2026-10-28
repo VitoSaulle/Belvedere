@@ -133,7 +133,8 @@ final class AppModel {
             store.restore(knownWindows: windows)
             savedWindows = windows
         }
-        startServer()
+        // In dimostrazione niente server: i hook delle sessioni vere non devono comparire.
+        if Belvedere.demoHome == nil { startServer() }
         if !hooksInstalled && !UserDefaults.standard.bool(forKey: Self.welcomeKey) { showWelcome = true }
 
         let watcher = DirectoryWatcher(paths: [roots.claude, roots.codex]) { [weak self] paths in

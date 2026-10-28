@@ -10,9 +10,10 @@ public struct TranscriptRoots: Sendable {
         self.codex = codex
     }
 
-    public static let `default` = TranscriptRoots(
-        claude: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects", isDirectory: true),
-        codex: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions", isDirectory: true))
+    public static var `default`: TranscriptRoots {
+        TranscriptRoots(claude: Belvedere.home.appendingPathComponent(".claude/projects", isDirectory: true),
+                        codex: Belvedere.home.appendingPathComponent(".codex/sessions", isDirectory: true))
+    }
 }
 
 public struct IndexUpdate: Sendable {
