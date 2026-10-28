@@ -65,6 +65,7 @@ final class AppModel {
         await absorb(IndexUpdate(changed: await index.sessions, newBuckets: []))
         // `open Belvedere.app --args -BelvedereOpenSession <id>` apre direttamente una sessione.
         if let id = UserDefaults.standard.string(forKey: "BelvedereOpenSession") { route = .session(id) }
+        if UserDefaults.standard.bool(forKey: "BelvedereOpenStats") { route = .stats }
         indexingProgress = 0
         let update = await index.refreshAll { [weak self] progress in
             Task { @MainActor in self?.indexingProgress = progress }

@@ -55,7 +55,7 @@ struct MainWindow: View {
                     }
                 }
         case .stats:
-            ContentUnavailableView("Statistiche", systemImage: "chart.bar.xaxis", description: Text("In arrivo."))
+            StatsView()
         }
     }
 }

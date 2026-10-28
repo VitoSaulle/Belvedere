@@ -64,7 +64,8 @@ enum Fmt {
         case ..<1_000: return "\(n)"
         case ..<100_000: return decimal(Double(n) / 1_000, digits: 1) + "k"
         case ..<1_000_000: return "\(n / 1_000)k"
-        default: return decimal(Double(n) / 1_000_000, digits: 2) + "M"
+        case ..<1_000_000_000: return decimal(Double(n) / 1_000_000, digits: n < 100_000_000 ? 2 : 1) + "M"
+        default: return decimal(Double(n) / 1_000_000_000, digits: 2) + " mld"
         }
     }
 
