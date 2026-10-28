@@ -58,6 +58,15 @@ import Testing
         #expect(contains(ClaudeCommand.arguments(o, isGitRepository: false), ["--model", "qwen3-coder-30b"]))
     }
 
+    @Test func userSettingsSurviveParentSessionCleanup() {
+        let base = ["CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8000",
+                    "CLAUDE_CODE_SSE_PORT": "1", "CLAUDE_CODE_EXECPATH": "/x", "CLAUDE_CODE_CHILD_SESSION": "1",
+                    "CLAUDE_CODE_SESSION_ATTENDED": "1", "CLAUDE_CODE_BRIDGE_SESSION_ID": "b",
+                    "CLAUDE_CODE_MESSAGING_SOCKET": "/s", "CLAUDE_CODE_MESSAGING_TOKEN": "t"]
+        let env = ClaudeCommand.environment(LaunchOptions(folder: "/p"), base: base)
+        #expect(env == ["CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8000"])
+    }
+
     @Test func cloudEnvironmentHasNoAnthropicOverrides() {
         let env = ClaudeCommand.environment(LaunchOptions(folder: "/p"), base: ["PATH": "/bin", "ANTHROPIC_LOG": "debug"])
         #expect(env == ["PATH": "/bin", "ANTHROPIC_LOG": "debug"])

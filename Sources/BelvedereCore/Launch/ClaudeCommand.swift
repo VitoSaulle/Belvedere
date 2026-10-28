@@ -9,12 +9,18 @@ public enum ClaudeCommand {
         baseArguments + variableArguments(o, isGitRepository: isGitRepository)
     }
 
+    /// Variabili che una sessione Claude genitore passa ai propri figli: non valgono per una sessione nuova.
+    /// Le altre `CLAUDE_CODE_*` sono impostazioni dell'utente e restano.
+    static let parentSessionVariables: Set<String> = [
+        "CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+    ]
+
     /// Variabili del processo: via quelle di una sessione Claude genitore, e per i modelli locali
     /// l'indirizzo di LM Studio. Nessun file di configurazione viene toccato.
     public static func environment(_ o: LaunchOptions, base: [String: String]) -> [String: String] {
-        var env = base.filter { key, _ in
-            !(key == "CLAUDECODE" || key == "CLAUDE_PID" || key == "CLAUDE_EFFORT" || key.hasPrefix("CLAUDE_CODE_"))
-        }
+        var env = base.filter { key, _ in !parentSessionVariables.contains(key) }
         if let local = o.local {
             env["ANTHROPIC_BASE_URL"] = "http://localhost:1234"
             env["ANTHROPIC_AUTH_TOKEN"] = "lmstudio"
