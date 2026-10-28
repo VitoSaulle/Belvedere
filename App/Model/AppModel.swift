@@ -103,6 +103,33 @@ final class AppModel {
         publish()
     }
 
+    // MARK: - Eliminazione
+
+    /// Si elimina solo una sessione ferma: non al lavoro, non in attesa, non aperta in Belvedere.
+    func canDelete(_ s: SessionSnapshot) -> Bool {
+        [.done, .idle, .ended].contains(s.status) && !isHosted(s.id)
+    }
+
+    /// Sessioni concluse da più di una settimana, nascoste comprese, che si possono eliminare in blocco.
+    var staleDeletableIDs: [String] {
+        HiddenSessions.staleIDs(allSessions, olderThanDays: 7, now: Date()).filter { id in session(id).map(canDelete) ?? false }
+    }
+
+    /// Cancella dal disco i file delle sessioni, senza passare dal Cestino. Le statistiche restano.
+    func delete(_ ids: [String]) async {
+        let ids = Set(ids.filter { id in session(id).map(canDelete) ?? false })
+        guard !ids.isEmpty else { return }
+        let deleted = Set(await index.delete(sessionIDs: ids))
+        guard !deleted.isEmpty else { return }
+        hostedSessions.removeAll { !$0.isRunning && deleted.contains($0.state.sessionID ?? "") }
+        if case .session(let id) = route, deleted.contains(id) { route = .plancia }
+        for id in deleted { hidden.unhide(id) }
+        saveHidden()
+        store.forget(deleted)
+        syncHosted()
+        await saveIndex()
+    }
+
     private static var hiddenURL: URL { Belvedere.supportDirectory.appendingPathComponent("hidden.json") }
 
     private func loadHidden() {

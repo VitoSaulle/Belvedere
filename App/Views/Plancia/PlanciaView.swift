@@ -1,3 +1,4 @@
+import AppKit
 import BelvedereCore
 import SwiftUI
 
@@ -95,6 +96,10 @@ struct PlanciaView: View {
                                  : "Nascondi le concluse da più di 7 giorni (\(stale.count))",
                    systemImage: "eye.slash") { model.hide(stale) }
                 .disabled(stale.isEmpty)
+            let staleDeletable = model.staleDeletableIDs
+            DeleteButton(sessionIDs: staleDeletable,
+                         title: staleDeletable.isEmpty ? "Nessuna sessione da eliminare"
+                                                       : "Elimina le concluse da più di 7 giorni (\(staleDeletable.count))…")
             SettingsLink {
                 Label("Sessioni nascoste (\(model.hiddenSessions.count))…", systemImage: "archivebox")
             }
@@ -147,7 +152,7 @@ struct PlanciaView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 290, maximum: 420), spacing: 14, alignment: .top)], spacing: 14) {
                 ForEach(visible) { session in
                     SessionCard(session: session)
-                        .contextMenu { HideButton(sessionID: session.id) }
+                        .contextMenu { SessionMenuItems(sessionID: session.id) }
                 }
             }
             .animation(.smooth(duration: 0.25), value: visible.map(\.id))
@@ -205,12 +210,40 @@ struct IndexingBar: View {
     }
 }
 
-/// Voce «Nascondi» dei menu contestuali: la sessione esce dalla vista ma i suoi file restano.
-struct HideButton: View {
+/// Voci «Nascondi» ed «Elimina…» dei menu contestuali delle sessioni.
+struct SessionMenuItems: View {
     @Environment(AppModel.self) private var model
     let sessionID: String
 
     var body: some View {
         Button("Nascondi", systemImage: "eye.slash") { model.hide([sessionID]) }
+        DeleteButton(sessionIDs: [sessionID])
     }
+}
+
+/// Elimina le sessioni dal disco, dopo una conferma: i file non passano dal Cestino.
+struct DeleteButton: View {
+    @Environment(AppModel.self) private var model
+    let sessionIDs: [String]
+    var title = "Elimina…"
+
+    var body: some View {
+        let deletable = sessionIDs.filter { id in model.session(id).map(model.canDelete) ?? false }
+        Button(title, systemImage: "trash", role: .destructive) {
+            guard confirmDeletion(deletable.count) else { return }
+            Task { await model.delete(deletable) }
+        }
+        .disabled(deletable.isEmpty)
+    }
+}
+
+@MainActor func confirmDeletion(_ count: Int) -> Bool {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = count == 1 ? "Eliminare la sessione?" : "Eliminare \(count) sessioni?"
+    alert.informativeText = "I file della trascrizione vengono cancellati subito, senza passare dal Cestino, "
+        + "e non si potranno più riprendere. Le statistiche d'uso restano."
+    alert.addButton(withTitle: "Elimina").hasDestructiveAction = true
+    alert.addButton(withTitle: "Annulla")
+    return alert.runModal() == .alertFirstButtonReturn
 }

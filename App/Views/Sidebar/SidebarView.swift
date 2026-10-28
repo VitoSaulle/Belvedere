@@ -28,7 +28,7 @@ struct SidebarView: View {
             Section {
                 ForEach(model.sessions.prefix(12)) { session in
                     SessionRow(session: session).tag(Route.session(session.id))
-                        .contextMenu { HideButton(sessionID: session.id) }
+                        .contextMenu { SessionMenuItems(sessionID: session.id) }
                 }
                 if model.sessions.isEmpty {
                     Text("Nessuna sessione").foregroundStyle(.secondary)

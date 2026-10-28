@@ -151,6 +151,16 @@ public struct LiveSessionStore: Sendable {
         }
     }
 
+    /// Sessioni eliminate: escono da tutti i canali.
+    public mutating func forget(_ ids: Set<String>) {
+        for id in ids {
+            logs.removeValue(forKey: id)
+            hooks.removeValue(forKey: id)
+            statusLines.removeValue(forKey: id)
+            hosted.removeValue(forKey: id)
+        }
+    }
+
     // MARK: - Uscite
 
     public var sessions: [SessionSnapshot] {

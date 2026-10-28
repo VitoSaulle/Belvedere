@@ -190,6 +190,35 @@ public actor TranscriptIndex {
         return await refresh(paths: Array(paths))
     }
 
+    /// Elimina dal disco le trascrizioni delle sessioni, subagenti compresi, e le toglie dall'indice
+    /// senza lasciare l'entrata in sospeso. Il consumo già contato resta nelle statistiche.
+    /// Restituisce gli id delle sessioni i cui file non ci sono più.
+    public func delete(sessionIDs ids: Set<String>) -> [String] {
+        loadIfNeeded()
+        var deleted: [String] = []
+        let fm = FileManager.default
+        for (path, entry) in entries where entry.parentSessionID == nil && ids.contains(entry.reducer.snapshot.id) {
+            let url = URL(fileURLWithPath: path)
+            guard classify(url) != nil else { continue }
+            var targets = [url]
+            if case .claude = entry.reducer {
+                // Accanto a <id>.jsonl, Claude tiene la cartella <id>/ con subagenti e risultati degli strumenti.
+                targets.append(url.deletingPathExtension())
+            }
+            for target in targets where fm.fileExists(atPath: target.path) {
+                try? fm.removeItem(at: target)
+            }
+            guard !fm.fileExists(atPath: path) else { continue }
+            let folder = url.deletingPathExtension().path + "/"
+            for (other, e) in entries where other == path || (e.parentSessionID != nil && other.hasPrefix(folder)) {
+                entries.removeValue(forKey: other)
+            }
+            dirty = true
+            deleted.append(entry.reducer.snapshot.id)
+        }
+        return deleted
+    }
+
     public func save() async throws {
         guard dirty else { return }
         try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
