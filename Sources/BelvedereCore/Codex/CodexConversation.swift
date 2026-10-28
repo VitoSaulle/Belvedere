@@ -114,14 +114,14 @@ public struct CodexConversation: Sendable {
         }
     }
 
-    /// Risposte per testo della domanda, come le dà la card; più scelte separate da «, ».
+    /// Risposte per testo della domanda, come le dà la card. Le domande di Codex sono a scelta singola:
+    /// la risposta resta intera anche se contiene una virgola.
     public mutating func answer(_ askID: String, answers: [String: String]) -> [Data] {
         guard case .question(let id, let ids)? = requests.removeValue(forKey: askID) else { return [] }
         var result: [String: JSONValue] = [:]
         for (question, answer) in answers {
             guard let key = ids[question] else { continue }
-            let labels = answer.components(separatedBy: ", ").map(JSONValue.string)
-            result[key] = .object(["answers": .array(labels)])
+            result[key] = .object(["answers": .array([.string(answer)])])
         }
         return [reply(id, .object(["answers": .object(result)]))]
     }

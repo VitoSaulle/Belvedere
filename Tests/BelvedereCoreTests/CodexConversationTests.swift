@@ -156,6 +156,16 @@ import Testing
         #expect(reply[0]["result"] == .object(["answers": .object(["colore": .object(["answers": .array([.string("Blu")])])])]))
     }
 
+    /// Le domande di Codex sono a scelta singola: un'etichetta con la virgola resta intera.
+    @Test func answerWithCommaStaysWhole() throws {
+        var (c, state) = ready()
+        let request = #"{"method":"item/tool/requestUserInput","id":8,"params":{"questions":[{"id":"q","question":"Tono?","options":[{"label":"Breve, diretto","description":""}]}]}}"#
+        _ = c.receive(Self.message(request), state: &state, now: now)
+        let ask = try #require(state.asks.first)
+        let reply = c.answer(ask.id, answers: ["Tono?": "Breve, diretto"]).map(Self.object)
+        #expect(reply[0]["result"]?["answers"]?["q"]?["answers"] == .array([.string("Breve, diretto")]))
+    }
+
     @Test func unknownServerRequestGetsErrorAndNote() {
         var (c, state) = ready()
         let out = c.receive(Self.message(#"{"method":"mcpServer/elicitation/request","id":9,"params":{}}"#), state: &state, now: now).map(Self.object)
