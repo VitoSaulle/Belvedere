@@ -78,6 +78,14 @@ import Testing
         #expect(r2.snapshot.tokens == TokenTotals(input: 18, output: 90, cacheRead: 4500, cacheWrite: 650))
     }
 
+    @Test func largeContextWidensWindow() {
+        let line = #"{"type":"assistant","sessionId":"s1","cwd":"/p","timestamp":"2026-10-27T10:00:00.000Z","message":{"id":"big","model":"claude-opus-5-5","stop_reason":"end_turn","content":[],"usage":{"input_tokens":5,"output_tokens":1,"cache_read_input_tokens":340000}}}"#
+        var r = reduced(all)
+        r.consume(Data(line.utf8))
+        #expect(r.snapshot.contextTokens == 340_005)
+        #expect(r.snapshot.contextWindow == 1_000_000)
+    }
+
     @Test func localModelDetected() {
         let line = #"{"type":"assistant","sessionId":"s9","cwd":"/p","timestamp":"2026-10-27T10:00:00.000Z","message":{"id":"x","model":"qwen3-coder-30b","stop_reason":"end_turn","content":[],"usage":{"input_tokens":1,"output_tokens":1}}}"#
         var r = ClaudeReducer(transcriptPath: "/tmp/s9.jsonl")

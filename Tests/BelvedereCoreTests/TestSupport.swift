@@ -38,3 +38,14 @@ enum Fixture {
         return text.split(separator: "\n").map { Data($0.utf8) }
     }
 }
+
+/// Valore protetto da lock, per raccogliere risultati da callback concorrenti.
+final class Locked<Value>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+    init(_ value: Value) { self.value = value }
+    func withLock<R>(_ body: (inout Value) -> R) -> R {
+        lock.lock(); defer { lock.unlock() }
+        return body(&value)
+    }
+}

@@ -24,6 +24,19 @@ struct RecentSet: Codable, Sendable {
     private var members: Set<String> = []
     var capacity = 512
 
+    init() {}
+
+    // Su disco si salva solo l'ordine: l'insieme si ricostruisce.
+    init(from decoder: Decoder) throws {
+        order = try decoder.singleValueContainer().decode([String].self)
+        members = Set(order)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(order)
+    }
+
     /// Inserisce l'elemento; restituisce false se era già presente.
     mutating func insert(_ value: String) -> Bool {
         guard !members.contains(value) else { return false }

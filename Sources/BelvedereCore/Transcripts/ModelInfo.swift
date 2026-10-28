@@ -2,6 +2,7 @@ import Foundation
 
 public enum ModelInfo {
     public static let defaultContextWindow = 200_000
+    public static let extendedContextWindow = 1_000_000
 
     /// Un modello servito a Claude Code che non è di Anthropic gira in locale (LM Studio).
     public static func isLocal(claudeModel: String) -> Bool {

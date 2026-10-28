@@ -13,10 +13,20 @@ public struct ClaudeReducer: TranscriptReducer {
         snapshot.contextWindow = ModelInfo.defaultContextWindow
     }
 
-    private static let markers = ["\"assistant\"", "\"user\"", "\"ai-title\"", "\"cost-state\""].map { Data($0.utf8) }
+    private static let wanted = ["assistant", "user", "ai-title", "cost-state"]
+    private static let markers = wanted.map { Data("\"\($0)\"".utf8) }
+    private static let typePrefix = Data(#"{"type":""#.utf8)
+    private static let wantedPrefixes = wanted.map { Data(#"{"type":"\#($0)""#.utf8) }
+
+    /// Scarta senza decodificarle le righe che non servono: molte (es. `api-request-blob`)
+    /// iniziano con il loro `type`, le altre devono almeno nominare un tipo utile.
+    static func isRelevant(_ line: Data) -> Bool {
+        if line.starts(with: typePrefix) { return wantedPrefixes.contains { line.starts(with: $0) } }
+        return markers.contains { line.range(of: $0) != nil }
+    }
 
     public mutating func consume(_ line: Data) {
-        guard Self.markers.contains(where: { line.range(of: $0) != nil }),
+        guard Self.isRelevant(line),
               let obj = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
               let type = obj["type"] as? String else { return }
         switch type {
@@ -53,7 +63,12 @@ public struct ClaudeReducer: TranscriptReducer {
                                      cacheRead: Self.int(usage["cache_read_input_tokens"]),
                                      cacheWrite: Self.int(usage["cache_creation_input_tokens"]))
             snapshot.tokens += tokens
-            snapshot.contextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
+            let context = tokens.input + tokens.cacheRead + tokens.cacheWrite
+            snapshot.contextTokens = context
+            // Il log non dice la finestra: se il contesto supera quella standard, è la variante da 1M.
+            if context > snapshot.contextWindow ?? ModelInfo.defaultContextWindow {
+                snapshot.contextWindow = ModelInfo.extendedContextWindow
+            }
             addUsage(date: date, tokens: tokens, tool: nil)
         }
 
