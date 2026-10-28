@@ -4,10 +4,7 @@ App macOS nativa che riunisce in un solo posto le sessioni di **Claude Code** e 
 
 *A native macOS app that brings your Claude Code and Codex sessions together: launch them, chat with them, watch the ones running in your terminal or IDE, and keep an eye on tokens, context and plan limits. The interface is in Italian.*
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/plancia-dark.png">
-  <img alt="La Plancia di Belvedere: tutte le sessioni di Claude Code e Codex, con stato, contesto, token e limiti del piano" src="docs/images/plancia-light.png">
-</picture>
+<p align="center"><img src="docs/images/belvedere.gif" alt="Belvedere: i terminali di Claude Code e Codex diventano le card della Plancia, poi una sessione e le statistiche" width="800"></p>
 
 > Belvedere è un progetto indipendente: non è affiliato ad Anthropic né a OpenAI. Usa le CLI `claude` e `codex` che hai già installato, così come sono.
 
@@ -22,6 +19,13 @@ App macOS nativa che riunisce in un solo posto le sessioni di **Claude Code** e 
 - Menu bar, notch, tema chiaro e scuro, avvio al login.
 
 ## Schermate
+
+**La Plancia**: tutte le sessioni, chi è al lavoro e chi ti aspetta, con i limiti del piano accanto.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/plancia-dark.png">
+  <img alt="La Plancia di Belvedere: tutte le sessioni di Claude Code e Codex, con stato, contesto, token e limiti del piano" src="docs/images/plancia-light.png">
+</picture>
 
 **Una sessione**: la chat con strumenti compatti e diff, e accanto contesto, token, costo stimato e file modificati.
 
