@@ -1,0 +1,36 @@
+name: Belvedere
+options:
+  bundleIdPrefix: it.vitosaulle
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  BelvedereCore:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    ENABLE_HARDENED_RUNTIME: NO
+targets:
+  Belvedere:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    dependencies:
+      - package: BelvedereCore
+        product: BelvedereCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: it.vitosaulle.Belvedere
+        INFOPLIST_FILE: App/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_APP_SANDBOX: NO
+schemes:
+  Belvedere:
+    build:
+      targets:
+        Belvedere: all
