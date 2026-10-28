@@ -98,7 +98,8 @@ public struct LiveSessionStore: Sendable {
         let at = status.limits?.observedAt ?? Date()
         advance(to: at)
         statusLines[status.sessionID] = StatusLineState(payload: status, at: at)
-        if let model = logs[status.sessionID]?.model { learnWindow(status.contextWindowSize, for: model) }
+        // L'id della status line è quello in uso (dopo `/model`) e distingue la variante `[1m]`.
+        if let model = status.modelID { learnWindow(status.contextWindowSize, for: model) }
         if let limits = status.limits { claudeLimits = limits }
     }
 
@@ -122,6 +123,8 @@ public struct LiveSessionStore: Sendable {
 
     private mutating func learnWindow(_ window: Int?, for model: String) {
         guard let window, window > 0, !ModelInfo.isLocal(claudeModel: model) else { return }
+        // Lo stesso id visto con due finestre: per un log non si sa quale valga, 0 = non applicare.
+        if let known = knownWindows[model], known != window { knownWindows[model] = 0; return }
         knownWindows[model] = window
     }
 

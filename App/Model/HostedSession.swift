@@ -162,7 +162,7 @@ final class HostedSession: Identifiable {
                 state.addNote("Modello: \(model), dal prossimo messaggio")
                 if options.local == nil { options.model = model }
             } else {
-                state.userSent(text, now: Date())
+                state.modelChanged(model)
                 write(StreamInput.setModel(requestID: UUID().uuidString, model: model))
                 // Dopo /clear o «Riavvia» il processo nuovo parte con questo modello, non con quello del lancio.
                 if options.local == nil { options.model = model }

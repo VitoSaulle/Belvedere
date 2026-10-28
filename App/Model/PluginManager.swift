@@ -38,7 +38,7 @@ final class PluginManager {
         let output = await Self.run(PluginCommand.arguments(action, plugin: plugin, scope: scope), in: projectPath)
         let result = PluginResult.decode(output.stdout, exitCode: output.code)
         if result.needsTerminal {
-            terminalCommand = "claude plugin \(action.rawValue) \(plugin) -s \(scope)"
+            terminalCommand = PluginCommand.terminalLine(action, plugin: plugin, scope: scope)
             error = nil
         } else if !result.succeeded {
             error = result.message.isEmpty ? Self.text(output) : result.message

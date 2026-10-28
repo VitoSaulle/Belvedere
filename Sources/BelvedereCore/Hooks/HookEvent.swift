@@ -127,4 +127,9 @@ public struct HookDeduplicator: Sendable {
         recent[key] = (event.requestID, now)
         return nil
     }
+
+    /// Richiesta risposta: un evento uguale che arriva dopo è una richiesta nuova (lo stesso comando due volte).
+    public mutating func forget(requestID: String) {
+        recent = recent.filter { $0.value.requestID != requestID }
+    }
 }

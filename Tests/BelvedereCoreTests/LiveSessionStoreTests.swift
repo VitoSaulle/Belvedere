@@ -266,8 +266,45 @@ import Testing
         var log = logSnapshot(status: .working, at: Date().addingTimeInterval(-60))
         log.model = "claude-opus-5-5"
         store.apply(IndexUpdate(changed: [log], newBuckets: []))
-        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","context_window":{"used_percentage":25,"context_window_size":1000000}}"#.utf8), now: Date()))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-opus-5-5"},"context_window":{"used_percentage":25,"context_window_size":1000000}}"#.utf8), now: Date()))
         #expect(store.knownWindows == ["claude-opus-5-5": 1_000_000])
+    }
+
+    /// La variante da 1M ha un suo id (`…[1m]`): non vale per i log del modello da 200k.
+    @Test func oneMillionVariantDoesNotWidenPlainLogs() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .done, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-opus-5-5[1m]"},"context_window":{"context_window_size":1000000}}"#.utf8), now: Date().addingTimeInterval(-120)))
+        var other = logSnapshot("s2", status: .done, at: Date())
+        other.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [other], newBuckets: []))
+        #expect(store.sessions.first { $0.id == "s2" }?.contextWindow == 200_000)
+    }
+
+    /// Dopo `/model` la status line parla del modello nuovo, non di quello scritto nel log.
+    @Test func statusLineTeachesItsOwnModel() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .working, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-haiku-5-5"},"context_window":{"context_window_size":1000000}}"#.utf8), now: Date()))
+        #expect(store.knownWindows == ["claude-haiku-5-5": 1_000_000])
+    }
+
+    /// Lo stesso modello visto con due finestre diverse: non si sa quale valga per un log, resta la stima.
+    @Test func conflictingWindowsAreNotApplied() throws {
+        var store = LiveSessionStore()
+        store.restore(knownWindows: ["claude-opus-5-5": 1_000_000])
+        var log = logSnapshot(status: .working, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-opus-5-5"},"context_window":{"context_window_size":200000}}"#.utf8), now: Date().addingTimeInterval(-120)))
+        var other = logSnapshot("s2", status: .done, at: Date())
+        other.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [other], newBuckets: []))
+        #expect(store.sessions.first { $0.id == "s2" }?.contextWindow == 200_000)
     }
 
     @Test func sortsWaitingThenWorkingThenRecent() {

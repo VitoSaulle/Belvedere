@@ -34,10 +34,22 @@ import Testing
     }
 
     @Test func commandArguments() {
-        #expect(PluginCommand.arguments(.install, plugin: "a@m", scope: "user") == ["plugin", "install", "a@m", "--json", "-s", "user"])
-        #expect(PluginCommand.arguments(.disable, plugin: "a@m", scope: "project") == ["plugin", "disable", "a@m", "--json", "-s", "project"])
-        #expect(PluginCommand.arguments(.update, plugin: "a@m", scope: "user") == ["plugin", "update", "a@m", "--json", "-s", "user"])
+        #expect(PluginCommand.arguments(.install, plugin: "a@m", scope: "user") == ["plugin", "install", "--json", "-s", "user", "--", "a@m"])
+        #expect(PluginCommand.arguments(.disable, plugin: "a@m", scope: "project") == ["plugin", "disable", "--json", "-s", "project", "--", "a@m"])
+        #expect(PluginCommand.arguments(.update, plugin: "a@m", scope: "user") == ["plugin", "update", "--json", "-s", "user", "--", "a@m"])
         #expect(PluginCommand.listArguments == ["plugin", "list", "--available", "--json"])
+    }
+
+    /// Il comando da incollare nel terminale non esegue nulla di nascosto nell'id del marketplace.
+    @Test func terminalLineIsQuoted() {
+        #expect(PluginCommand.terminalLine(.install, plugin: "a@m", scope: "user") == "claude plugin install 'a@m' -s 'user'")
+        #expect(PluginCommand.terminalLine(.install, plugin: "x;$(rm -rf ~)@m", scope: "user")
+                == "claude plugin install 'x;$(rm -rf ~)@m' -s 'user'")
+    }
+
+    /// Un id che comincia con `-` non diventa un'opzione.
+    @Test func pluginIDIsNeverAnOption() {
+        #expect(PluginCommand.arguments(.install, plugin: "-y", scope: "user") == ["plugin", "install", "--json", "-s", "user", "--", "-y"])
     }
 
     @Test func resultLine() {

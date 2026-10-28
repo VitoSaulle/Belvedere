@@ -71,7 +71,12 @@ public enum PluginCommand {
     /// Mai `-y`: un plugin che si installa eseguendo un comando del marketplace va confermato
     /// da una persona che lo legge, nel terminale.
     public static func arguments(_ action: PluginAction, plugin: String, scope: String) -> [String] {
-        ["plugin", action.rawValue, plugin, "--json", "-s", scope]
+        ["plugin", action.rawValue, "--json", "-s", scope, "--", plugin]
+    }
+
+    /// La riga da incollare nel terminale: id e ambito tra apici, l'id viene da un marketplace.
+    public static func terminalLine(_ action: PluginAction, plugin: String, scope: String) -> String {
+        "claude plugin \(action.rawValue) \(ClaudeCommand.quote(plugin)) -s \(ClaudeCommand.quote(scope))"
     }
 }
 

@@ -184,6 +184,11 @@ public struct ChatState: Sendable {
     }
 
     /// Riga della sessione che non è di nessuno (un'interruzione, un cambio di modello).
+    /// `/model` è una richiesta di controllo, non un turno: nessun `result` lo chiuderà.
+    public mutating func modelChanged(_ model: String) {
+        addNote("Modello: \(model)")
+    }
+
     public mutating func addNote(_ text: String) {
         items.append(.note(id: "nota-\(UUID().uuidString)", text: text))
     }

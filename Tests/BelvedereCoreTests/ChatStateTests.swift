@@ -173,6 +173,23 @@ import Testing
         #expect(state.status == .done)
     }
 
+    /// `/model` è una richiesta di controllo: non apre un turno e non ha un `result` che lo chiuda.
+    @Test func modelChangeDuringATurnIsNotAQueuedTurn() {
+        var state = ChatState()
+        let success = Data(#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#.utf8)
+        state.userSent("poesia", now: now)
+        state.modelChanged("claude-haiku-5-5")
+        state.apply(StreamMessage.decode(success), now: now)
+        #expect(state.status == .done)
+    }
+
+    @Test func modelChangeWhileIdleStaysIdle() {
+        var state = ChatState()
+        state.modelChanged("claude-haiku-5-5")
+        #expect(state.status != .working)
+        #expect(state.items.count == 1)
+    }
+
     /// Dopo «Ferma» la CLI esegue comunque i messaggi in coda.
     @Test func queuedMessageRunsAfterInterrupt() {
         var state = ChatState()

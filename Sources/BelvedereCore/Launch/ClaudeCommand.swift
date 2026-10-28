@@ -15,6 +15,8 @@ public enum ClaudeCommand {
         "CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
         "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ATTENDED",
         "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+        // Modalità bare di un genitore lanciato con `--bare`: Belvedere non la usa mai.
+        "CLAUDE_CODE_SIMPLE",
     ]
 
     /// Variabili del processo: via quelle di una sessione Claude genitore, e per i modelli locali

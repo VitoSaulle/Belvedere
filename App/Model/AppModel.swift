@@ -239,6 +239,7 @@ final class AppModel {
         guard request.kind == .permission else { return }
         let broker = self.broker
         Task { await broker.resolve(requestID: request.id, with: decision) }
+        hookDuplicates.forget(requestID: request.id)
         store.clearPending(requestID: request.id)
         publish()
     }

@@ -42,8 +42,8 @@ public actor PermissionBroker {
     /// Attende la decisione per la richiesta; `nil` = nessuna risposta, decide il terminale.
     public func decision(for requestID: String) async -> PermissionDecision? {
         guard case .hold(let timeout) = policy else { return nil }
-        if let answer = early.removeValue(forKey: requestID),
-           Date().timeIntervalSince(answer.at) < Self.earlyLifetime {
+        // Non si consuma: il doppione dello stesso hook può arrivare dopo e vuole la stessa risposta.
+        if let answer = early[requestID], Date().timeIntervalSince(answer.at) < Self.earlyLifetime {
             return answer.decision
         }
         let token = UUID()
@@ -73,12 +73,9 @@ public actor PermissionBroker {
     }
 
     public func resolve(requestID: String, with decision: PermissionDecision) {
-        guard waiters[requestID] != nil else {
-            let now = Date()
-            early = early.filter { now.timeIntervalSince($0.value.at) < Self.earlyLifetime }
-            early[requestID] = (decision, now)
-            return
-        }
+        let now = Date()
+        early = early.filter { now.timeIntervalSince($0.value.at) < Self.earlyLifetime }
+        early[requestID] = (decision, now)
         finish(requestID, with: decision)
     }
 

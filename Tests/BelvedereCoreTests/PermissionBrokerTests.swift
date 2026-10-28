@@ -77,6 +77,24 @@ import Testing
         #expect(await broker.decision(for: "r1") == .deny(reason: "no"))
     }
 
+    /// Il doppione che arriva a chiedere dopo che il primo ha già avuto la risposta non resta appeso.
+    @Test func lateDuplicateGetsTheAnswerToo() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        async let first = broker.decision(for: "r1")
+        try await Task.sleep(for: .milliseconds(50))
+        await broker.resolve(requestID: "r1", with: .allow)
+        #expect(await first == .allow)
+        #expect(await broker.decision(for: "r1") == .allow)
+    }
+
+    /// Risposta data prima che i due doppioni aspettino: la ricevono entrambi.
+    @Test func earlyAnswerServesBothDuplicates() async {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        await broker.resolve(requestID: "r1", with: .deny(reason: "no"))
+        #expect(await broker.decision(for: "r1") == .deny(reason: "no"))
+        #expect(await broker.decision(for: "r1") == .deny(reason: "no"))
+    }
+
     @Test func oldTimerDoesNotCloseANewWait() async throws {
         let broker = PermissionBroker(policy: .hold(timeoutSeconds: 0.3))
         async let first = broker.decision(for: "r1")

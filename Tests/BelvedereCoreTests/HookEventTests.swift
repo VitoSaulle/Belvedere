@@ -105,6 +105,17 @@ import Testing
         #expect(second.with(requestID: first.requestID).requestID == first.requestID)
     }
 
+    /// Una richiesta già risposta non assorbe quella uguale che segue (es. lo stesso comando due volte):
+    /// la seconda è una card nuova.
+    @Test func answeredRequestIsForgotten() throws {
+        var dedup = HookDeduplicator()
+        let now = Date()
+        let first = try event("PermissionRequest", rm)
+        _ = dedup.duplicate(of: first, now: now)
+        dedup.forget(requestID: first.requestID)
+        #expect(dedup.duplicate(of: try event("PermissionRequest", rm), now: now.addingTimeInterval(1)) == nil)
+    }
+
     @Test func sameRequestLaterIsNew() throws {
         var dedup = HookDeduplicator()
         let now = Date()

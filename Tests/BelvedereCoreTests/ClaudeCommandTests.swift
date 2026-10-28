@@ -72,6 +72,12 @@ import Testing
         #expect(env == ["PATH": "/bin", "ANTHROPIC_LOG": "debug"])
     }
 
+    /// Una sessione genitore in modalità bare non deve passarla al figlio: Belvedere non lancia mai `--bare`.
+    @Test func bareModeIsNotInherited() {
+        let env = ClaudeCommand.environment(LaunchOptions(folder: "/p"), base: ["PATH": "/bin", "CLAUDE_CODE_SIMPLE": "1"])
+        #expect(env == ["PATH": "/bin"])
+    }
+
     @Test func skipNeverCarriedOver() {
         let next = LaunchOptions(folder: "/p", permission: .skip, resumeID: "x").forNextLaunch
         #expect(next.permission == .ask)
