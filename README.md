@@ -15,6 +15,7 @@ App macOS nativa che riunisce in un solo posto le sessioni di **Claude Code** e 
 - **Permessi e domande** a cui rispondere dalla Plancia, dalla menu bar o dal notch, senza aprire la sessione.
 - **Statistiche**: token al giorno, progetti, strumenti più usati, quota cloud/locale e una stima del costo a prezzi API.
 - **Limiti del piano** di Claude e di Codex (finestra di 5 ore e settimanale).
+- **Profili** per più account di Claude Code e Codex: ognuno nella sua cartella (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), con un profilo attivo per le nuove sessioni. La Plancia mette in risalto le sessioni del profilo attivo, e «Continua con…» porta una conversazione su un altro account quando finiscono i limiti.
 - **Plugin di Claude Code** da un pannello nativo, sopra `claude plugin`.
 - Menu bar, notch, tema chiaro e scuro, avvio al login.
 
@@ -59,11 +60,12 @@ L'app è firmata con Developer ID e notarizzata da Apple: si apre con un doppio 
 
 ## Cosa tocca sul tuo Mac
 
-- **`~/.claude/settings.json`**: solo quando lo chiedi tu, con «Collega Claude Code». Belvedere aggiunge i propri hook e la status line, e prima salva una copia accanto al file (`settings.json.belvedere-<data>.bak`). «Scollega Claude Code» nelle Impostazioni li toglie.
+- **`~/.claude/settings.json`**: solo quando lo chiedi tu, con «Collega Claude Code». Belvedere aggiunge i propri hook e la status line, e prima salva una copia accanto al file (`settings.json.belvedere-<data>.bak`). «Scollega Claude Code» nelle Impostazioni li toglie. Con più profili vale lo stesso per il `settings.json` di ciascun profilo Claude.
+- **Le cartelle dei profili** che crei (di solito `~/.claude-<nome>` o `~/.codex-<nome>`): Belvedere ci copia, se lo chiedi, le impostazioni del profilo principale senza chiavi né token. Il login lo fa la CLI nel Terminale. Eliminare un profilo non cancella la sua cartella. «Continua con…» sposta il file della conversazione da un profilo all'altro e cancella l'originale solo dopo la prima risposta riuscita.
 - **`~/Library/Application Support/Belvedere`**: due piccoli helper (`belvedere-hook`, `belvedere-statusline`) e la cache dell'indice delle sessioni.
 - **Un server locale su `127.0.0.1:47615`**, che riceve gli eventi dei hook. Non è raggiungibile da altri computer.
 
-Belvedere legge i log delle sessioni in `~/.claude/projects` e `~/.codex/sessions`. Non legge, salva o trasmette credenziali, token o dati dell'account. Non modifica `~/.codex/config.toml` e non manda nulla in rete: parla solo con `localhost` (i propri helper e LM Studio), e le uniche connessioni verso l'esterno sono quelle delle CLI che lancia.
+Belvedere legge i log delle sessioni in `~/.claude/projects` e `~/.codex/sessions`, e nelle stesse sottocartelle di ogni profilo. Non legge, salva o trasmette credenziali, token o dati dell'account. Non modifica `~/.codex/config.toml` e non manda nulla in rete: parla solo con `localhost` (i propri helper e LM Studio), e le uniche connessioni verso l'esterno sono quelle delle CLI che lancia.
 
 ## Compilare dal codice
 
