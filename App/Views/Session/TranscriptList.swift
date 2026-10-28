@@ -89,6 +89,7 @@ struct TranscriptRow: View {
         for (index, part) in parts.enumerated() {
             switch part {
             case .text(let text):
+                let text = Self.bullets(text)
                 out += (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
                     ?? AttributedString(text)
             case .code(let code):
@@ -99,6 +100,16 @@ struct TranscriptRow: View {
             }
         }
         return out
+    }
+
+    /// Il markdown inline non conosce gli elenchi: «- voce» diventa «•  voce».
+    static func bullets(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+            let indent = line.prefix { $0 == " " }
+            let rest = line.dropFirst(indent.count)
+            guard rest.hasPrefix("- ") || rest.hasPrefix("* ") else { return String(line) }
+            return indent + "•  " + rest.dropFirst(2)
+        }.joined(separator: "\n")
     }
 }
 

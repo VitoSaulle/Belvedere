@@ -50,6 +50,6 @@ struct PlanUsageCard: View {
     private var lmStudioText: String {
         guard let status = model.lmStudio, status.reachable else { return "LM Studio · non in esecuzione" }
         let loaded = status.models.filter(\.loaded).count
-        return loaded > 0 ? "LM Studio · in linea · \(loaded) caricati" : "LM Studio · in linea · \(status.models.count) modelli"
+        return loaded > 0 ? "LM Studio · in linea · \(loaded == 1 ? "1 caricato" : "\(loaded) caricati")" : "LM Studio · in linea · \(status.models.count) modelli"
     }
 }

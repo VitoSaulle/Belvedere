@@ -96,11 +96,17 @@ struct SessionCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.color(for: session.status))
             }
-            Text(session.lastText ?? Fmt.folder(session.cwd))
+            Text(session.lastText.map(Self.inline) ?? AttributedString(Fmt.folder(session.cwd)))
                 .font(.system(size: 12.5))
                 .foregroundStyle(.primary.opacity(0.75))
                 .lineLimit(2, reservesSpace: true)
         }
+    }
+
+    /// Anteprima su due righe: grassetti e `codice` resi, il resto del markdown lasciato com'è.
+    static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
     }
 
     private var footer: some View {
