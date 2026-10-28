@@ -161,7 +161,7 @@ struct PendingBox: View {
             }
             HStack(spacing: 8) {
                 Spacer()
-                if pending.kind == .permission && model.policy != .observeOnly {
+                if pending.kind == .permission && model.answersHere(session.id) {
                     Button("Nega") { model.respond(to: pending, with: .deny(reason: "Negato da Belvedere")) }
                         .buttonStyle(.bordered)
                         .buttonBorderShape(.capsule)

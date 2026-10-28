@@ -229,6 +229,12 @@ final class AppModel {
         publish()
     }
 
+    /// Le card di permesso si possono rispondere da qui: sempre per le sessioni lanciate da Belvedere,
+    /// per quelle del terminale solo se non si è scelto «Solo osservare».
+    func answersHere(_ sessionID: String) -> Bool {
+        policy != .observeOnly || host(for: sessionID) != nil
+    }
+
     func activateOrigin(of sessionID: String) {
         guard let origin = session(sessionID)?.origin else { return }
         if let pid = origin.pid, let app = NSRunningApplication(processIdentifier: pid) {

@@ -183,10 +183,12 @@ struct NeedsYouContent: View {
                 .background(.white.opacity(0.08), in: .rect(cornerRadius: 10))
             HStack(spacing: 8) {
                 Spacer()
-                if request.kind == .permission && model.policy != .observeOnly {
+                if request.kind == .permission && model.answersHere(sessionID) {
                     pill("Nega", strong: false) { model.respond(to: request, with: .deny(reason: "Negato da Belvedere")) }
                     pill("Apri", strong: false) { controller.open(sessionID) }
                     pill("Consenti", strong: true) { model.respond(to: request, with: .allow) }
+                } else if model.host(for: sessionID) != nil {
+                    pill("Rispondi", strong: true) { controller.open(sessionID) }
                 } else {
                     pill("Apri", strong: false) { controller.open(sessionID) }
                     pill("Vai al terminale", strong: true) { model.activateOrigin(of: sessionID) }
