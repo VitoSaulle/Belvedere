@@ -4,6 +4,11 @@ App macOS nativa che riunisce in un solo posto le sessioni di **Claude Code** e 
 
 *A native macOS app that brings your Claude Code and Codex sessions together: launch them, chat with them, watch the ones running in your terminal or IDE, and keep an eye on tokens, context and plan limits. The interface is in Italian.*
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/plancia-dark.png">
+  <img alt="La Plancia di Belvedere: tutte le sessioni di Claude Code e Codex, con stato, contesto, token e limiti del piano" src="docs/images/plancia-light.png">
+</picture>
+
 > Belvedere è un progetto indipendente: non è affiliato ad Anthropic né a OpenAI. Usa le CLI `claude` e `codex` che hai già installato, così come sono.
 
 ## Cosa fa
@@ -15,6 +20,24 @@ App macOS nativa che riunisce in un solo posto le sessioni di **Claude Code** e 
 - **Limiti del piano** di Claude e di Codex (finestra di 5 ore e settimanale).
 - **Plugin di Claude Code** da un pannello nativo, sopra `claude plugin`.
 - Menu bar, notch, tema chiaro e scuro, avvio al login.
+
+## Schermate
+
+**Una sessione**: la chat con strumenti compatti e diff, e accanto contesto, token, costo stimato e file modificati.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/sessione-dark.png">
+  <img alt="Una sessione di Claude Code in Belvedere" src="docs/images/sessione-light.png">
+</picture>
+
+**Statistiche**: token al giorno per Claude, Codex e modelli locali, progetti, strumenti più usati.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/stats-dark.png">
+  <img alt="Le statistiche di Belvedere" src="docs/images/stats-light.png">
+</picture>
+
+*Le schermate usano dati di prova.*
 
 ## Requisiti
 
