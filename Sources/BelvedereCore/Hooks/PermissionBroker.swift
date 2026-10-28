@@ -30,8 +30,8 @@ public enum PermissionDecision: Sendable, Equatable {
 /// Accoppia le richieste di permesso in arrivo dai hook con le risposte date nell'interfaccia.
 public actor PermissionBroker {
     private var policy: PermissionPolicy
-    private var waiters: [String: (token: UUID, continuation: CheckedContinuation<PermissionDecision?, Never>)] = [:]
-    /// Risposte arrivate prima che il hook registrasse l'attesa (la card compare prima dell'attesa).
+    /// Per richiesta, ogni attesa aperta: con hook globale e di progetto la stessa richiesta arriva due volte.
+    private var waiters: [String: [UUID: CheckedContinuation<PermissionDecision?, Never>]] = [:]
     private var early: [String: (decision: PermissionDecision, at: Date)] = [:]
     private static let earlyLifetime: TimeInterval = 30
 
@@ -46,20 +46,19 @@ public actor PermissionBroker {
            Date().timeIntervalSince(answer.at) < Self.earlyLifetime {
             return answer.decision
         }
+        let token = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                waiters.removeValue(forKey: requestID)?.continuation.resume(returning: nil)
                 guard !Task.isCancelled else { continuation.resume(returning: nil); return }
-                // Il timer chiude solo questa attesa, non una più recente con lo stesso id.
-                let token = UUID()
-                waiters[requestID] = (token, continuation)
+                waiters[requestID, default: [:]][token] = continuation
+                // Il timer chiude solo questa attesa.
                 Task { [weak self] in
                     try? await Task.sleep(for: .seconds(timeout))
-                    await self?.expire(requestID, token: token)
+                    await self?.finish(requestID, token: token, with: nil)
                 }
             }
         } onCancel: {
-            Task { await self.finish(requestID, with: nil) }
+            Task { await self.finish(requestID, token: token, with: nil) }
         }
     }
 
@@ -92,16 +91,19 @@ public actor PermissionBroker {
         let pending = waiters
         waiters.removeAll()
         early.removeAll()
-        for waiter in pending.values { waiter.continuation.resume(returning: nil) }
+        for continuation in pending.values.flatMap(\.values) { continuation.resume(returning: nil) }
     }
 
     private func finish(_ requestID: String, with decision: PermissionDecision?) {
-        waiters.removeValue(forKey: requestID)?.continuation.resume(returning: decision)
+        for continuation in (waiters.removeValue(forKey: requestID) ?? [:]).values {
+            continuation.resume(returning: decision)
+        }
     }
 
-    private func expire(_ requestID: String, token: UUID) {
-        guard waiters[requestID]?.token == token else { return }
-        finish(requestID, with: nil)
+    private func finish(_ requestID: String, token: UUID, with decision: PermissionDecision?) {
+        guard let continuation = waiters[requestID]?.removeValue(forKey: token) else { return }
+        if waiters[requestID]?.isEmpty == true { waiters.removeValue(forKey: requestID) }
+        continuation.resume(returning: decision)
     }
 }
 

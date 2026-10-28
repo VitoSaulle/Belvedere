@@ -85,3 +85,38 @@ import Testing
         #expect(HookResponse.body(for: nil).isEmpty)
     }
 }
+
+@Suite struct HookDeduplicatorTests {
+    private func event(_ name: String, _ extra: String = "") throws -> HookEvent {
+        let json = #"{"session_id":"s1","cwd":"/p","hook_event_name":"\#(name)""# + extra + "}"
+        return try HookEvent.decode(name: name, body: Data(json.utf8))
+    }
+
+    private let rm = #","tool_name":"Bash","tool_input":{"command":"rm -rf build"},"belvedere_ppid":42"#
+
+    /// Hook globale e di progetto: lo stesso PermissionRequest arriva due volte con id generati diversi.
+    @Test func secondCopyGetsTheFirstRequestID() throws {
+        var dedup = HookDeduplicator()
+        let now = Date()
+        let first = try event("PermissionRequest", rm), second = try event("PermissionRequest", rm)
+        #expect(first.requestID != second.requestID)
+        #expect(dedup.duplicate(of: first, now: now) == nil)
+        #expect(dedup.duplicate(of: second, now: now.addingTimeInterval(0.5)) == first.requestID)
+        #expect(second.with(requestID: first.requestID).requestID == first.requestID)
+    }
+
+    @Test func sameRequestLaterIsNew() throws {
+        var dedup = HookDeduplicator()
+        let now = Date()
+        _ = dedup.duplicate(of: try event("PermissionRequest", rm), now: now)
+        #expect(dedup.duplicate(of: try event("PermissionRequest", rm), now: now.addingTimeInterval(10)) == nil)
+    }
+
+    @Test func differentInputOrEventIsNew() throws {
+        var dedup = HookDeduplicator()
+        let now = Date()
+        _ = dedup.duplicate(of: try event("PermissionRequest", rm), now: now)
+        #expect(dedup.duplicate(of: try event("PermissionRequest", #","tool_name":"Bash","tool_input":{"command":"ls"}"#), now: now) == nil)
+        #expect(dedup.duplicate(of: try event("PreToolUse", rm), now: now) == nil)
+    }
+}

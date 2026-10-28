@@ -59,6 +59,7 @@ final class AppModel {
     /// Sessioni passate al terminale il cui processo è ancora vivo; aggiornato col tick, non a ogni ridisegno.
     private(set) var terminalOwned: Set<String> = []
     @ObservationIgnored private var savedWindows: [String: Int] = [:]
+    @ObservationIgnored private var hookDuplicates = HookDeduplicator()
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
@@ -457,9 +458,13 @@ final class AppModel {
             guard method == "POST" else { return (404, Data()) }
             if path.hasPrefix("/hooks/") {
                 let name = String(path.dropFirst("/hooks/".count))
-                guard let event = try? HookEvent.decode(name: name, body: body) else { return (400, Data()) }
-                let origin = event.callerPID.flatMap { OriginResolver.resolve(pid: $0) }
-                await self?.ingest(event, origin: origin)
+                guard let decoded = try? HookEvent.decode(name: name, body: body) else { return (400, Data()) }
+                // Il doppione (hook globale + di progetto) aspetta la stessa risposta ma non si registra due volte.
+                guard let (event, isNew) = await self?.deduplicated(decoded) else { return (200, Data()) }
+                if isNew {
+                    let origin = event.callerPID.flatMap { OriginResolver.resolve(pid: $0) }
+                    await self?.ingest(event, origin: origin)
+                }
                 guard name == "PermissionRequest" else { return (200, Data()) }
                 // Le sessioni di Belvedere chiedono il permesso nella chat: il hook globale non deve duplicarlo.
                 if await self?.isHosted(event.sessionID) == true { return (200, Data()) }
@@ -489,6 +494,11 @@ final class AppModel {
     private func requestClosed(_ requestID: String) {
         store.clearPending(requestID: requestID)
         publish()
+    }
+
+    private func deduplicated(_ event: HookEvent) -> (HookEvent, isNew: Bool) {
+        guard let original = hookDuplicates.duplicate(of: event, now: Date()) else { return (event, true) }
+        return (event.with(requestID: original), false)
     }
 
     private func ingest(_ event: HookEvent, origin: SessionOrigin?) {
