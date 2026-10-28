@@ -4,6 +4,8 @@ import Synchronization
 
 /// Server HTTP/1.1 minimo, solo su 127.0.0.1: riceve hook e status line.
 /// Una richiesta per connessione, corpo con `Content-Length`, massimo 1 MiB.
+/// Rifiuta le richieste con `Origin`: le manda solo un browser, e una pagina web non deve
+/// poter iniettare eventi o risposte finte.
 public final class LocalHTTPServer: Sendable {
     public typealias Handler = @Sendable (_ method: String, _ path: String, _ body: Data) async -> (status: Int, body: Data)
 
@@ -11,11 +13,14 @@ public final class LocalHTTPServer: Sendable {
     public let host = "127.0.0.1"
     private let requestedPort: UInt16
     private let handler: Handler
+    /// Tempo massimo per ricevere la richiesta intera; l'attesa della risposta non ha limite.
+    private let idleTimeout: TimeInterval
     private let queue = DispatchQueue(label: "it.vitosaulle.Belvedere.server")
     private let state = Mutex<(listener: NWListener?, port: UInt16?)>((nil, nil))
 
-    public init(port: UInt16, handler: @escaping Handler) {
+    public init(port: UInt16, idleTimeout: TimeInterval = 10, handler: @escaping Handler) {
         self.requestedPort = port
+        self.idleTimeout = idleTimeout
         self.handler = handler
     }
 
@@ -66,24 +71,38 @@ public final class LocalHTTPServer: Sendable {
 
     private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
-        receive(connection, buffer: Data())
+        let received = Received()
+        queue.asyncAfter(deadline: .now() + idleTimeout) {
+            if !received.done.withLock({ $0 }) { connection.cancel() }
+        }
+        receive(connection, buffer: Data(), received: received)
     }
 
-    private func receive(_ connection: NWConnection, buffer: Data) {
+    private final class Received: Sendable {
+        let done = Mutex(false)
+    }
+
+    private func receive(_ connection: NWConnection, buffer: Data, received: Received) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] chunk, _, isComplete, error in
             guard let self else { connection.cancel(); return }
             var buffer = buffer
             if let chunk { buffer.append(chunk) }
             switch Self.parse(buffer) {
             case .incomplete where error == nil && !isComplete:
-                self.receive(connection, buffer: buffer)
+                self.receive(connection, buffer: buffer, received: received)
+            case .forbidden:
+                received.done.withLock { $0 = true }
+                self.respond(connection, status: 403, body: Data())
             case .incomplete, .malformed:
                 self.respond(connection, status: 400, body: Data())
             case .tooLarge(let total):
+                // Da qui il client sta mandando dati: il limite d'inattività non vale più.
+                received.done.withLock { $0 = true }
                 // Chiudere con dati non letti fa partire un RST e il client perde il 413:
                 // si scarta il resto del corpo (entro un limite) e poi si risponde.
                 self.discard(connection, remaining: min(total, Self.drainLimit) - buffer.count)
             case .request(let method, let path, let body):
+                received.done.withLock { $0 = true }
                 let task = Task {
                     let result = await self.handler(method, path, body)
                     if !Task.isCancelled { self.respond(connection, status: result.status, body: result.body) }
@@ -122,7 +141,7 @@ public final class LocalHTTPServer: Sendable {
     }
 
     private func respond(_ connection: NWConnection, status: Int, body: Data) {
-        let reason = [200: "OK", 204: "No Content", 400: "Bad Request", 404: "Not Found", 413: "Payload Too Large"][status] ?? "Status"
+        let reason = [200: "OK", 204: "No Content", 400: "Bad Request", 403: "Forbidden", 404: "Not Found", 413: "Payload Too Large"][status] ?? "Status"
         var head = "HTTP/1.1 \(status) \(reason)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"
         if !body.isEmpty { head += "Content-Type: application/json\r\n" }
         var data = Data((head + "\r\n").utf8)
@@ -131,7 +150,7 @@ public final class LocalHTTPServer: Sendable {
     }
 
     enum Parsed: Equatable {
-        case incomplete, malformed
+        case incomplete, malformed, forbidden
         /// Corpo oltre il limite; `total` = byte attesi fra intestazioni e corpo.
         case tooLarge(total: Int)
         case request(method: String, path: String, body: Data)
@@ -148,6 +167,7 @@ public final class LocalHTTPServer: Sendable {
         var length = 0
         for line in lines.dropFirst() {
             let pair = line.split(separator: ":", maxSplits: 1)
+            if pair.count == 2, pair[0].lowercased() == "origin" { return .forbidden }
             if pair.count == 2, pair[0].lowercased() == "content-length" {
                 guard let n = Int(pair[1].trimmingCharacters(in: .whitespaces)), n >= 0 else { return .malformed }
                 length = n

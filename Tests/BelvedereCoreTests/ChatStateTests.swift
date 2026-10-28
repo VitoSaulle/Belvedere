@@ -137,6 +137,69 @@ import Testing
         #expect(state.lastError == "Claude Code non trovato.")
     }
 
+    @Test func longStderrKeepsTheLastMeaningfulLines() {
+        var state = ChatState()
+        let stderr = """
+        node:internal/process: warning
+        Error: boom
+            at foo (/x.js:1:1)
+            at bar (/x.js:2:2)
+        Riga utile uno
+        Riga utile due
+
+        Messaggio finale
+        """
+        state.processExited(code: 1, stderr: stderr, now: now)
+        #expect(state.lastError == "Riga utile uno\nRiga utile due\nMessaggio finale")
+        #expect(state.errorDetail == stderr)
+    }
+
+    @Test func shortStderrHasNoDetail() {
+        var state = ChatState()
+        state.processExited(code: 1, stderr: "Invalid API key\n", now: now)
+        #expect(state.lastError == "Invalid API key")
+        #expect(state.errorDetail == nil)
+    }
+
+    /// Un messaggio scritto durante un turno parte subito dopo: niente «conclusa» in mezzo.
+    @Test func queuedMessageKeepsWorkingBetweenTurns() {
+        var state = ChatState()
+        let success = Data(#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#.utf8)
+        state.userSent("poesia", now: now)
+        state.userSent("DUE", now: now)
+        state.apply(StreamMessage.decode(success), now: now)
+        #expect(state.status == .working)
+        state.apply(StreamMessage.decode(success), now: now)
+        #expect(state.status == .done)
+    }
+
+    /// `/model` è una richiesta di controllo: non apre un turno e non ha un `result` che lo chiuda.
+    @Test func modelChangeDuringATurnIsNotAQueuedTurn() {
+        var state = ChatState()
+        let success = Data(#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#.utf8)
+        state.userSent("poesia", now: now)
+        state.modelChanged("claude-haiku-5-5")
+        state.apply(StreamMessage.decode(success), now: now)
+        #expect(state.status == .done)
+    }
+
+    @Test func modelChangeWhileIdleStaysIdle() {
+        var state = ChatState()
+        state.modelChanged("claude-haiku-5-5")
+        #expect(state.status != .working)
+        #expect(state.items.count == 1)
+    }
+
+    /// Dopo «Ferma» la CLI esegue comunque i messaggi in coda.
+    @Test func queuedMessageRunsAfterInterrupt() {
+        var state = ChatState()
+        let interrupted = Data(#"{"type":"result","subtype":"error_during_execution","is_error":true}"#.utf8)
+        state.userSent("poesia", now: now)
+        state.userSent("DUE", now: now)
+        state.apply(StreamMessage.decode(interrupted), now: now)
+        #expect(state.status == .working)
+    }
+
     @Test func cleanExitHasNoError() {
         var state = ChatState()
         state.processExited(code: 0, stderr: "", now: now)

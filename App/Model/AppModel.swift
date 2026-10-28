@@ -10,7 +10,9 @@ final class AppModel {
     /// Tutte le sessioni, nascoste comprese: statistiche e apertura per id.
     private(set) var allSessions: [SessionSnapshot] = []
     private(set) var hidden = HiddenSessions()
+    /// Limiti del piano Claude; quelli di Codex sono di un altro piano e restano a parte.
     var planLimits: PlanLimits?
+    var codexLimits: PlanLimits?
     var lmStudio: LMStudioStatus?
     var feed: [ActivityEvent] = []
     var indexingProgress: Double?
@@ -50,16 +52,23 @@ final class AppModel {
     }()
     /// Foglio «Nuova sessione», con la cartella proposta.
     var showNewSession = false
+    var showPlugins = false
+    let plugins = PluginManager()
     var newSessionFolder: String?
     /// Sessioni passate al terminale da questa esecuzione: osservate, così la vista si aggiorna subito.
     private(set) var handedOff: Set<String> = []
-    /// Cartelle con un `claude` vivo che non è di Belvedere (terminale, IntelliJ…), aggiornate ogni 5 s;
-    /// `nil` finché non sono state lette.
-    private(set) var busyFolders: Set<String>?
+    /// Cartelle con un `claude` o un `codex` vivo che non è di Belvedere (terminale, IntelliJ…),
+    /// aggiornate ogni 5 s; `nil` finché non sono state lette.
+    private(set) var busyFolders: [AgentKind: Set<String>]?
+    /// Sessioni passate al terminale il cui processo è ancora vivo; aggiornato col tick, non a ogni ridisegno.
+    private(set) var terminalOwned: Set<String> = []
+    @ObservationIgnored private var savedWindows: [String: Int] = [:]
+    @ObservationIgnored private var hookDuplicates = HookDeduplicator()
 
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
     static let limitsKey = "lastClaudeLimits"
+    static let windowsKey = "knownContextWindows"
 
     init(roots: TranscriptRoots = .default,
          policy: PermissionPolicy = PermissionPolicy(storageValue: UserDefaults.standard.string(forKey: AppModel.policyKey))) {
@@ -120,6 +129,10 @@ final class AppModel {
             store.apply(claudeLimits: saved)
             store.tick(now: Date())
         }
+        if let windows = UserDefaults.standard.dictionary(forKey: Self.windowsKey) as? [String: Int] {
+            store.restore(knownWindows: windows)
+            savedWindows = windows
+        }
         startServer()
         if !hooksInstalled && !UserDefaults.standard.bool(forKey: Self.welcomeKey) { showWelcome = true }
 
@@ -137,6 +150,7 @@ final class AppModel {
         // `open Belvedere.app --args -BelvedereOpenSession <id>` apre direttamente una sessione.
         if let id = UserDefaults.standard.string(forKey: "BelvedereOpenSession") { route = .session(id) }
         if UserDefaults.standard.bool(forKey: "BelvedereOpenStats") { route = .stats }
+        if UserDefaults.standard.bool(forKey: "BelvedereShowPlugins") { showPlugins = true }
         if UserDefaults.standard.bool(forKey: "BelvedereNewSession") {
             newSessionFolder = UserDefaults.standard.string(forKey: "BelvedereNewSessionFolder")
             showNewSession = true
@@ -150,6 +164,7 @@ final class AppModel {
         feedReady = true
 
         loops.append(repeating(every: .seconds(5)) { model in model.tick() })
+        loops.append(repeating(every: .seconds(5)) { model in await model.pollCodex() })
         loops.append(repeating(every: .seconds(10)) { model in await model.pollLMStudio() })
         loops.append(repeating(every: .seconds(60)) { model in await model.saveIndex() })
         await pollLMStudio()
@@ -224,8 +239,15 @@ final class AppModel {
         guard request.kind == .permission else { return }
         let broker = self.broker
         Task { await broker.resolve(requestID: request.id, with: decision) }
+        hookDuplicates.forget(requestID: request.id)
         store.clearPending(requestID: request.id)
         publish()
+    }
+
+    /// Le card di permesso si possono rispondere da qui: sempre per le sessioni lanciate da Belvedere,
+    /// per quelle del terminale solo se non si è scelto «Solo osservare».
+    func answersHere(_ sessionID: String) -> Bool {
+        policy != .observeOnly || host(for: sessionID) != nil
     }
 
     func activateOrigin(of sessionID: String) {
@@ -274,8 +296,8 @@ final class AppModel {
         host.resumeBlocker = { [weak self, weak host] in
             guard let self, let host else { return nil }
             let folder = host.state.cwd ?? host.options.folder
-            guard self.claudeFolders().contains(RunningProcesses.canonical(folder)) else { return nil }
-            return "Claude Code è già aperto in questa cartella, ad esempio in un terminale: chiudilo per continuare qui."
+            guard self.agentFolders(host.agent).contains(RunningProcesses.canonical(folder)) else { return nil }
+            return "\(host.agent.productName) è già aperto in questa cartella, ad esempio in un terminale: chiudilo per continuare qui."
         }
         hostedSessions.append(host)
         host.start()
@@ -291,43 +313,59 @@ final class AppModel {
             route = .session(sessionID)
             return
         }
-        let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: .claude)) ?? []
-        launch(LaunchOptions.resuming(s), history: history)
+        let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: s.agent)) ?? []
+        var options = LaunchOptions.resuming(s)
+        // Il log riporta la finestra dichiarata dall'agente; per un modello locale vale quella caricata in LM Studio.
+        if let local = options.local, let loaded = lmStudio?.models.first(where: { $0.id == local.id && $0.loaded }) {
+            options.local = LocalModelChoice(id: local.id, contextLength: loaded.contextLength ?? local.contextLength)
+        }
+        launch(options, history: history)
     }
 
     /// «Riprendi in Belvedere» solo se la sessione non è viva altrove: mai due processi sulla stessa sessione.
     func canResumeHere(_ s: SessionSnapshot) -> Bool {
-        guard s.agent == .claude, !s.cwd.isEmpty, !isHosted(s.id) else { return false }
-        // Se nessun `claude` di altri lavora in quella cartella, la sessione non è viva altrove:
+        guard !s.cwd.isEmpty, !isHosted(s.id) else { return false }
+        // Se nessun `claude` (o `codex`) di altri lavora in quella cartella, la sessione non è viva altrove:
         // vale anche dopo un crash (log fermo su «al lavoro») e per le sessioni nate prima di Belvedere.
-        guard let busyFolders, !busyFolders.contains(RunningProcesses.canonical(s.cwd)) else { return false }
+        guard let busy = busyFolders?[s.agent], !busy.contains(RunningProcesses.canonical(s.cwd)) else { return false }
         // Passata al terminale: finché quel processo vive, anche prima dei suoi hook, la sessione è sua.
-        let pidFile = Self.handoffPID(s.id)
-        // Appena passata il PID può non essere ancora scritto: intanto vale come occupata.
-        if handedOff.contains(s.id), !FileManager.default.fileExists(atPath: pidFile.path) { return false }
-        return !TerminalHandoff.isRunning(pidFile: pidFile)
+        return !terminalOwned.contains(s.id)
     }
 
-    /// Cartelle dei `claude` vivi, esclusi quelli lanciati da Belvedere.
-    private func claudeFolders() -> Set<String> {
-        RunningProcesses.folders(named: "claude", excluding: Set(hostedSessions.compactMap(\.pid)))
+    /// Cartelle dei `claude` o `codex` vivi, esclusi quelli lanciati da Belvedere.
+    private func agentFolders(_ agent: AgentKind) -> Set<String> {
+        RunningProcesses.folders(named: agent.rawValue, excluding: Set(hostedSessions.compactMap(\.pid)))
     }
 
     private func refreshBusyFolders() {
-        let folders = claudeFolders()
+        let folders = Dictionary(uniqueKeysWithValues: AgentKind.allCases.map { ($0, agentFolders($0)) })
         if folders != busyFolders { busyFolders = folders }
+        let owned = Set(Self.handoffIDs().union(handedOff).filter { id in
+            let pidFile = Self.handoffPID(id)
+            // Appena passata il PID può non essere ancora scritto: intanto vale come occupata.
+            if handedOff.contains(id), !FileManager.default.fileExists(atPath: pidFile.path) { return true }
+            return TerminalHandoff.isRunning(pidFile: pidFile)
+        })
+        if owned != terminalOwned { terminalOwned = owned }
+    }
+
+    /// Le sessioni passate al terminale in questa esecuzione e quelle con un file PID rimasto da prima.
+    private static func handoffIDs() -> Set<String> {
+        let dir = Belvedere.supportDirectory.appendingPathComponent("handoff")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return Set(files.filter { $0.hasSuffix(".pid") }.map { String($0.dropLast(4)) })
     }
 
     private static func handoffPID(_ id: String) -> URL {
         Belvedere.supportDirectory.appendingPathComponent("handoff/\(id).pid")
     }
 
-    /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume`.
+    /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume` o `codex resume`.
     func openInTerminal(_ sessionID: String) async {
         let host = host(for: sessionID)
         // Senza id (nessun messaggio ancora inviato) non c'è niente da riprendere nel terminale.
         guard let s = host?.state.snapshot(launchedAt: host?.launchedAt) ?? session(sessionID),
-              let binary = host?.binary ?? HostedSession(options: LaunchOptions(folder: "/")).binary else { return }
+              let binary = host?.binary ?? HostedSession(options: LaunchOptions(folder: "/", agent: s.agent)).binary else { return }
         await host?.stop()
         // Da qui la sessione è del terminale: Belvedere la osserva soltanto.
         if let host {
@@ -339,9 +377,15 @@ final class AppModel {
         let url = folder.appendingPathComponent("\(s.id).command")
         // Una sessione locale resta su LM Studio anche nel terminale.
         let options = host.map { $0.options.resuming(s.id, cwd: s.cwd) } ?? LaunchOptions.resuming(s)
-        let local = options.local == nil ? [:] : ClaudeCommand.environment(options, base: [:])
-        let script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
+        let script: String
+        if s.agent == .codex {
+            script = TerminalHandoff.script(cwd: s.cwd, arguments: [binary] + CodexCommand.terminalArguments(options),
+                                            pidFile: Self.handoffPID(s.id).path)
+        } else {
+            let local = options.local == nil ? [:] : ClaudeCommand.environment(options, base: [:])
+            script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
                                             pidFile: Self.handoffPID(s.id).path, environment: local)
+        }
         try? FileManager.default.removeItem(at: Self.handoffPID(s.id))
         handedOff.insert(s.id)
         do {
@@ -386,11 +430,19 @@ final class AppModel {
             // Dopo /clear la chat resta questa, in attesa del nuovo id.
             route = .session(Self.provisionalPrefix + host.id.uuidString)
         }
-        if let limits = host.state.limits, limits != store.claudeLimits {
+        // I limiti di Codex arrivano già dai file di sessione: qui solo quelli del piano Claude.
+        if host.agent == .claude, let limits = host.state.limits, limits != store.claudeLimits {
             store.apply(claudeLimits: limits)
             if let data = try? JSONEncoder().encode(limits) { UserDefaults.standard.set(data, forKey: Self.limitsKey) }
         }
         syncHosted()
+        saveKnownWindows()
+    }
+
+    private func saveKnownWindows() {
+        guard store.knownWindows != savedWindows else { return }
+        savedWindows = store.knownWindows
+        UserDefaults.standard.set(savedWindows, forKey: Self.windowsKey)
     }
 
     private func syncHosted() {
@@ -412,9 +464,13 @@ final class AppModel {
             guard method == "POST" else { return (404, Data()) }
             if path.hasPrefix("/hooks/") {
                 let name = String(path.dropFirst("/hooks/".count))
-                guard let event = try? HookEvent.decode(name: name, body: body) else { return (400, Data()) }
-                let origin = event.callerPID.flatMap { OriginResolver.resolve(pid: $0) }
-                await self?.ingest(event, origin: origin)
+                guard let decoded = try? HookEvent.decode(name: name, body: body) else { return (400, Data()) }
+                // Il doppione (hook globale + di progetto) aspetta la stessa risposta ma non si registra due volte.
+                guard let (event, isNew) = await self?.deduplicated(decoded) else { return (200, Data()) }
+                if isNew {
+                    let origin = event.callerPID.flatMap { OriginResolver.resolve(pid: $0) }
+                    await self?.ingest(event, origin: origin)
+                }
                 guard name == "PermissionRequest" else { return (200, Data()) }
                 // Le sessioni di Belvedere chiedono il permesso nella chat: il hook globale non deve duplicarlo.
                 if await self?.isHosted(event.sessionID) == true { return (200, Data()) }
@@ -446,6 +502,11 @@ final class AppModel {
         publish()
     }
 
+    private func deduplicated(_ event: HookEvent) -> (HookEvent, isNew: Bool) {
+        guard let original = hookDuplicates.duplicate(of: event, now: Date()) else { return (event, true) }
+        return (event.with(requestID: original), false)
+    }
+
     private func ingest(_ event: HookEvent, origin: SessionOrigin?) {
         let closed = store.apply(event, origin: origin)
         if !closed.isEmpty {
@@ -465,11 +526,19 @@ final class AppModel {
         if let limits = payload.limits, let data = try? JSONEncoder().encode(limits) {
             UserDefaults.standard.set(data, forKey: Self.limitsKey)
         }
+        saveKnownWindows()
         publish()
     }
 
     private func refresh(paths: [String]) async {
         await absorb(await index.refresh(paths: paths))
+    }
+
+    /// Le sessioni Codex aperte non arrivano da FSEvents: vedi `TranscriptIndex.pollCodex`.
+    private func pollCodex() async {
+        let update = await index.pollCodex(now: Date())
+        guard !update.changed.isEmpty || !update.newBuckets.isEmpty else { return }
+        await absorb(update)
     }
 
     private func absorb(_ update: IndexUpdate) async {
@@ -486,7 +555,10 @@ final class AppModel {
     }
 
     private func pollLMStudio() async {
-        lmStudio = await lmMonitor.poll()
+        let status = await lmMonitor.poll()
+        guard status != lmStudio else { return }
+        lmStudio = status
+        publish()
     }
 
     private func saveIndex() async {
@@ -494,13 +566,15 @@ final class AppModel {
     }
 
     private func publish() {
-        let next = store.sessions
+        let next = LMStudioModel.applyLoadedContext(to: store.sessions, models: lmStudio?.models ?? [])
         if feedReady { addToFeed(ActivityFeed.events(from: allSessions, to: next, now: Date())) }
         if next != allSessions { allSessions = next }
         let visible = next.filter { !hidden.isHidden($0) }
         if visible != sessions { sessions = visible }
-        let limits = store.planLimits
+        let limits = store.planLimits(.claude)
         if limits != planLimits { planLimits = limits }
+        let codex = store.planLimits(.codex)
+        if codex != codexLimits { codexLimits = codex }
     }
 
     private func addToFeed(_ events: [ActivityEvent]) {

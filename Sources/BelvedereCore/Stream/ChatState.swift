@@ -2,6 +2,9 @@ import Foundation
 
 /// Conversazione di una sessione lanciata da Belvedere, ricostruita dai messaggi stream-json.
 public struct ChatState: Sendable {
+    public var agent: AgentKind
+    /// Modello di LM Studio: niente costi e niente quota del piano.
+    public var isLocal: Bool
     public var items: [TranscriptItem]
     /// Testo dell'assistente ancora in arrivo nel turno in corso.
     public var streaming: String?
@@ -19,16 +22,26 @@ public struct ChatState: Sendable {
     public var contextWindow: Int?
     public var costUSD: Double?
     public var limits: PlanLimits?
-    public var lastError: String?
+    /// Le righe utili dell'errore; `errorDetail` ha il testo completo quando è stato accorciato.
+    public var lastError: String? { didSet { errorDetail = nil } }
+    public var errorDetail: String?
+    /// Un messaggio scritto mentre Claude lavorava: la CLI lo esegue dopo il `result` del turno in corso
+    /// (anche dopo un'interruzione), unendo in un turno solo tutti quelli in coda.
+    var queuedTurn = false
     public var lastActivity: Date?
 
-    public init(history: [TranscriptItem] = []) {
+    public init(agent: AgentKind = .claude, isLocal: Bool = false, history: [TranscriptItem] = []) {
+        self.agent = agent
+        self.isLocal = isLocal
         items = history
     }
 
     /// Una sessione ripresa con `--resume`: la CLI manda `init` solo al primo turno,
     /// ma id e cartella sono già noti.
-    public init(history: [TranscriptItem] = [], resuming sessionID: String, folder: String) {
+    public init(agent: AgentKind = .claude, isLocal: Bool = false, history: [TranscriptItem] = [],
+                resuming sessionID: String, folder: String) {
+        self.agent = agent
+        self.isLocal = isLocal
         items = history
         self.sessionID = sessionID
         cwd = folder
@@ -84,7 +97,10 @@ public struct ChatState: Sendable {
             if let cost = result.costUSD { costUSD = cost }
             if let tokens = result.contextTokens, tokens > 0 { contextTokens = tokens }
             if let window = result.contextWindow { contextWindow = window }
-            if result.subtype == "error_during_execution" {
+            if queuedTurn {
+                queuedTurn = false
+                status = asks.isEmpty ? .working : .waiting
+            } else if result.subtype == "error_during_execution" {
                 if status != .idle { status = .idle }
             } else {
                 status = asks.isEmpty ? .done : .waiting
@@ -98,6 +114,7 @@ public struct ChatState: Sendable {
     }
 
     public mutating func userSent(_ text: String, now: Date) {
+        if status == .working || status == .waiting { queuedTurn = true }
         items.append(.user(id: "local-\(UUID().uuidString)", text: text))
         status = asks.isEmpty ? .working : .waiting
         lastError = nil
@@ -106,6 +123,7 @@ public struct ChatState: Sendable {
 
     /// Il messaggio non è arrivato a Claude (processo assente o chiuso): niente «al lavoro».
     public mutating func sendFailed(_ error: String, now: Date) {
+        queuedTurn = false
         streaming = nil
         asks = []
         status = .ended
@@ -119,21 +137,36 @@ public struct ChatState: Sendable {
     }
 
     public mutating func processExited(code: Int32, stderr: String, now: Date) {
+        queuedTurn = false
         streaming = nil
         asks = []
         status = .ended
         lastActivity = now
         guard code != 0 else { return }
         let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        lastError = text.isEmpty ? "Claude Code si è chiuso con il codice \(code)." : text
+        guard !text.isEmpty else {
+            lastError = "\(agent.productName) si è chiuso con il codice \(code)."
+            return
+        }
+        let summary = Self.errorSummary(text)
+        lastError = summary
+        if summary != text { errorDetail = stderr }
+    }
+
+    /// Le ultime 3 righe non vuote che non sono righe di uno stack (`at …`): il motivo sta in fondo.
+    static func errorSummary(_ text: String) -> String {
+        let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("at ") }
+        return lines.suffix(3).joined(separator: "\n")
     }
 
     /// La sessione come la vedono Plancia, menu bar e notch; `nil` finché Claude non ha dato l'id.
     public func snapshot(launchedAt: Date?) -> SessionSnapshot? {
         guard let sessionID else { return nil }
-        var s = SessionSnapshot(id: sessionID, agent: .claude, cwd: cwd ?? "")
+        var s = SessionSnapshot(id: sessionID, agent: agent, cwd: cwd ?? "")
         s.status = status
         s.model = model
+        s.isLocalModel = isLocal
         s.startedAt = launchedAt
         s.lastActivity = lastActivity ?? launchedAt
         s.contextTokens = contextTokens
@@ -150,7 +183,17 @@ public struct ChatState: Sendable {
         return s
     }
 
-    private mutating func upsert(_ item: TranscriptItem) {
+    /// Riga della sessione che non è di nessuno (un'interruzione, un cambio di modello).
+    /// `/model` è una richiesta di controllo, non un turno: nessun `result` lo chiuderà.
+    public mutating func modelChanged(_ model: String) {
+        addNote("Modello: \(model)")
+    }
+
+    public mutating func addNote(_ text: String) {
+        items.append(.note(id: "nota-\(UUID().uuidString)", text: text))
+    }
+
+    mutating func upsert(_ item: TranscriptItem) {
         if let index = items.firstIndex(where: { $0.id == item.id }) {
             items[index] = item
         } else {

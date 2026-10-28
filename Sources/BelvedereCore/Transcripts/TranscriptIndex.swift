@@ -59,10 +59,15 @@ public actor TranscriptIndex {
         var reducer: AnyReducer
         /// Per le trascrizioni dei subagenti: la sessione madre a cui imputare il consumo.
         var parentSessionID: String?
+        /// Il file è sparito: l'entrata resta un giorno, così se ricompare (riscrittura atomica, spostamento)
+        /// riprende da dove era invece di ricontare tutto.
+        var goneAt: Date?
     }
 
+    static let tombstoneLifetime: TimeInterval = 24 * 3600
+
     /// Da aumentare quando cambia il modo in cui i riduttori leggono i log: la cache vecchia si ricostruisce.
-    static let cacheVersion = 4
+    static let cacheVersion = 8
 
     struct Cache: Codable {
         var version = TranscriptIndex.cacheVersion
@@ -78,6 +83,16 @@ public actor TranscriptIndex {
     public init(roots: TranscriptRoots, cacheURL: URL) {
         self.roots = roots
         self.cacheURL = cacheURL
+    }
+
+    /// La cache (diversi MB) si legge al primo uso, dentro l'actor e non sul thread principale.
+    private var loaded = false
+    /// Cambiato dall'ultimo salvataggio: senza modifiche `save()` non riscrive il file.
+    private var dirty = false
+
+    private func loadIfNeeded() {
+        guard !loaded else { return }
+        loaded = true
         if let data = try? Data(contentsOf: cacheURL),
            let cache = try? JSONDecoder().decode(Cache.self, from: data), cache.version == Self.cacheVersion {
             entries = cache.entries
@@ -87,22 +102,31 @@ public actor TranscriptIndex {
 
     /// Sessioni visibili (esclusi i subagenti), dalla più recente.
     public var sessions: [SessionSnapshot] {
-        entries.values.filter { $0.parentSessionID == nil }.map(\.reducer.snapshot)
+        loadIfNeeded()
+        return entries.values.filter { $0.parentSessionID == nil && $0.goneAt == nil }.map(\.reducer.snapshot)
             .sorted { ($0.lastActivity ?? .distantPast) > ($1.lastActivity ?? .distantPast) }
     }
 
-    public var buckets: [UsageBucket] { Array(bucketTable.values) }
+    public var buckets: [UsageBucket] {
+        loadIfNeeded()
+        return Array(bucketTable.values)
+    }
 
     public var latestCodexLimits: PlanLimits? {
-        entries.values.compactMap { entry -> PlanLimits? in
+        loadIfNeeded()
+        return entries.values.compactMap { entry -> PlanLimits? in
             if case .codex(let r) = entry.reducer { return r.planLimits }
             return nil
         }.max { $0.observedAt < $1.observedAt }
     }
 
-    func offset(for path: String) -> UInt64? { entries[path]?.tailer.offset }
+    func offset(for path: String) -> UInt64? {
+        loadIfNeeded()
+        return entries[path]?.tailer.offset
+    }
 
     public func refreshAll(progress: (@Sendable (Double) -> Void)?) async -> IndexUpdate {
+        loadIfNeeded()
         let found = discover()
         let foundPaths = Set(found.map(\.path))
         var changed: [SessionSnapshot] = []
@@ -110,6 +134,9 @@ public actor TranscriptIndex {
         for path in entries.keys where !foundPaths.contains(path) {
             if let ended = endSession(path) { changed.append(ended) }
         }
+        let now = Date()
+        let expired = entries.filter { $0.value.goneAt.map { now.timeIntervalSince($0) > Self.tombstoneLifetime } ?? false }
+        for path in expired.keys { entries.removeValue(forKey: path) }
         for (i, file) in found.enumerated() {
             if let result = process(file) {
                 if result.visible { changed.append(result.snapshot) }
@@ -123,6 +150,7 @@ public actor TranscriptIndex {
     }
 
     public func refresh(paths: [String]) async -> IndexUpdate {
+        loadIfNeeded()
         var changed: [SessionSnapshot] = []
         var newBuckets: [UsageBucket] = []
         for path in Set(paths) {
@@ -140,10 +168,33 @@ public actor TranscriptIndex {
         return IndexUpdate(changed: changed, newBuckets: newBuckets)
     }
 
+    /// Codex tiene aperto il file di sessione e FSEvents non ne segnala le scritture finché non lo chiude:
+    /// si ricontrollano i file di oggi e di ieri e quelli modificati nelle ultime 48 ore.
+    /// I file invariati costano solo uno `stat`.
+    public func pollCodex(now: Date, calendar: Calendar = .current) async -> IndexUpdate {
+        loadIfNeeded()
+        var paths: Set<String> = []
+        for offset in [0, -1] {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
+            let d = calendar.dateComponents([.year, .month, .day], from: date)
+            let dir = roots.codex.appendingPathComponent(String(format: "%04d/%02d/%02d", d.year ?? 0, d.month ?? 0, d.day ?? 0))
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            for name in names where name.hasPrefix("rollout-") && name.hasSuffix(".jsonl") {
+                paths.insert(dir.appendingPathComponent(name).standardizedFileURL.path)
+            }
+        }
+        for (path, entry) in entries {
+            if case .codex = entry.reducer, now.timeIntervalSince(entry.mtime) < 48 * 3600 { paths.insert(path) }
+        }
+        return await refresh(paths: Array(paths))
+    }
+
     public func save() async throws {
+        guard dirty else { return }
         try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(Cache(entries: entries, buckets: bucketTable))
         try data.write(to: cacheURL, options: .atomic)
+        dirty = false
     }
 
     // MARK: - File
@@ -204,8 +255,9 @@ public actor TranscriptIndex {
     private func process(_ file: FoundFile) -> (snapshot: SessionSnapshot, buckets: [UsageBucket], visible: Bool)? {
         var entry: Entry
         if let existing = entries[file.path] {
-            if existing.size == file.size && existing.mtime == file.mtime { return nil }
+            if existing.size == file.size && existing.mtime == file.mtime && existing.goneAt == nil { return nil }
             entry = existing
+            entry.goneAt = nil
         } else {
             let reducer: AnyReducer
             var parent: String?
@@ -234,6 +286,7 @@ public actor TranscriptIndex {
         entry.size = file.size
         entry.mtime = file.mtime
         entries[file.path] = entry
+        dirty = true
         for bucket in buckets { merge(bucket) }
         return (entry.reducer.snapshot, buckets, entry.parentSessionID == nil)
     }
@@ -247,6 +300,7 @@ public actor TranscriptIndex {
 
     private func merge(_ bucket: UsageBucket) {
         let key = [bucket.day, bucket.sessionID, bucket.agent.rawValue, bucket.model].joined(separator: "|")
+        dirty = true
         guard var existing = bucketTable[key] else { bucketTable[key] = bucket; return }
         existing.tokens += bucket.tokens
         existing.toolCounts.merge(bucket.toolCounts, uniquingKeysWith: +)
@@ -255,7 +309,11 @@ public actor TranscriptIndex {
 
     /// Il file è sparito: la sessione esce dall'indice, il consumo resta nelle statistiche.
     private func endSession(_ path: String) -> SessionSnapshot? {
-        guard let entry = entries.removeValue(forKey: path), entry.parentSessionID == nil else { return nil }
+        guard var entry = entries[path], entry.goneAt == nil else { return nil }
+        entry.goneAt = Date()
+        entries[path] = entry
+        dirty = true
+        guard entry.parentSessionID == nil else { return nil }
         var snapshot = entry.reducer.snapshot
         snapshot.status = .ended
         return snapshot

@@ -160,10 +160,14 @@ struct WaitingCard: View {
             }
             HStack(spacing: 6) {
                 Spacer()
-                if let pending = session.pending, pending.kind == .permission, model.policy != .observeOnly {
+                if let pending = session.pending, pending.kind == .permission, model.answersHere(session.id) {
                     Button("Nega") { model.respond(to: pending, with: .deny(reason: "Negato da Belvedere")) }
                     Button("Apri", action: openSession)
                     Button("Consenti") { model.respond(to: pending, with: .allow) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.primary)
+                } else if model.host(for: session.id) != nil {
+                    Button("Rispondi", action: openSession)
                         .buttonStyle(.borderedProminent)
                         .tint(Color.primary)
                 } else {

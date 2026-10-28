@@ -68,7 +68,7 @@ struct StatsView: View {
         HStack(spacing: 14) {
             Kpi(label: "Token", value: Fmt.tokens(s.totalTokens), delta: delta(s))
             Kpi(label: "Stima API", value: s.costUSD.map(Fmt.usd) ?? "—",
-                delta: s.costUSD == nil ? "nessuna sessione riporta un costo" : "da Claude Code, solo sessioni Claude")
+                delta: s.costUSD == nil ? "nessun modello con listino noto" : "token × listino, solo modelli Claude")
             Kpi(label: "Sessioni", value: "\(s.sessions)",
                 delta: "Claude \(s.sessionsByAgent[.claude] ?? 0) · Codex \(s.sessionsByAgent[.codex] ?? 0)")
             Kpi(label: "Sessioni locali", value: "\(s.localSessions)", delta: "\(Fmt.percent(s.localShare)) dei token")

@@ -6,10 +6,12 @@ public enum SlashRoute: Equatable, Sendable {
     /// `/clear`: nuovo processo nella stessa cartella.
     case clear
     case setModel(String)
+    /// `/plugin`: il pannello nativo, sopra `claude plugin …`.
+    case plugins
     /// Comandi che funzionano solo nel terminale.
     case terminalOnly(String)
 
-    static let alwaysTerminal: Set<String> = ["plugin", "login", "logout", "resume", "exit", "quit"]
+    static let alwaysTerminal: Set<String> = ["login", "logout", "resume", "exit", "quit"]
 
     public static func route(_ text: String, terminalCommands: [String]) -> SlashRoute {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -19,6 +21,7 @@ public enum SlashRoute: Equatable, Sendable {
         let argument = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
         switch name {
         case "clear": return .clear
+        case "plugin", "plugins": return .plugins
         case "model" where !argument.isEmpty: return .setModel(argument)
         default:
             if alwaysTerminal.contains(name) || terminalCommands.contains(name) { return .terminalOnly(name) }

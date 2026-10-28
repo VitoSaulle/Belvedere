@@ -93,6 +93,20 @@ import Testing
         #expect(try SettingsFile(url: tmp.url.appendingPathComponent("none.json")).read().isEmpty)
     }
 
+    @Test func symlinkedSettingsStayALink() throws {
+        let tmp = TempDir()
+        let real = tmp.file("dotfiles/settings.json", #"{"model":"opus"}"#)
+        let link = tmp.url.appendingPathComponent("settings.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let backup = try #require(try SettingsFile(url: link).writeWithBackup(["model": "sonnet"]))
+        let kind = try FileManager.default.attributesOfItem(atPath: link.path)[.type] as? FileAttributeType
+        #expect(kind == .typeSymbolicLink)
+        #expect(try SettingsFile(url: real).read()["model"] as? String == "sonnet")
+        #expect(try String(contentsOf: backup, encoding: .utf8) == #"{"model":"opus"}"#)
+        let backupKind = try FileManager.default.attributesOfItem(atPath: backup.path)[.type] as? FileAttributeType
+        #expect(backupKind == .typeRegular)
+    }
+
     @Test func backupsInSameSecondDoNotOverwrite() throws {
         let tmp = TempDir()
         let url = tmp.file("settings.json", #"{"v":1}"#)

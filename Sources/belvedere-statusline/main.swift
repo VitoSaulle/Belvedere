@@ -3,6 +3,8 @@ import Foundation
 
 // belvedere-statusline [--wrap <base64>]: inoltra a Belvedere il JSON della status line,
 // poi stampa la status line originale dell'utente (se c'era) o una riga compatta.
+// Un comando avvolto che non legge lo stdin chiude la pipe: niente SIGPIPE, solo un errore ignorato.
+signal(SIGPIPE, SIG_IGN)
 let input = FileHandle.standardInput.readDataToEndOfFile()
 _ = Relay.post(path: "/statusline", body: input, port: Relay.port, timeout: 0.3)
 
@@ -16,7 +18,7 @@ if let i = args.firstIndex(of: "--wrap"), i + 1 < args.count,
     process.standardInput = stdin
     do {
         try process.run()
-        stdin.fileHandleForWriting.write(input)
+        try? stdin.fileHandleForWriting.write(contentsOf: input)
         try? stdin.fileHandleForWriting.close()
         process.waitUntilExit()
         exit(process.terminationStatus)

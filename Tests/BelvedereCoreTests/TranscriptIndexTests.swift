@@ -62,6 +62,24 @@ import Testing
         #expect(await index.sessions.count == 1)
     }
 
+    /// Un file sparito e ricomparso (riscrittura atomica, spostamento) non si riconta da capo.
+    @Test func reappearingFileIsNotCountedTwice() async throws {
+        let files = seed()
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let total = await index.buckets.reduce(0) { $0 + $1.tokens.output }
+        let saved = try Data(contentsOf: files.claude)
+        try FileManager.default.removeItem(at: files.claude)
+        _ = await index.refresh(paths: [files.claude.path])
+        #expect(await index.sessions.allSatisfy { $0.id != "s1" })
+        try saved.write(to: files.claude)
+        let update = await index.refresh(paths: [files.claude.path])
+        #expect(update.changed.map(\.id) == ["s1"])
+        #expect(update.newBuckets.isEmpty)
+        #expect(await index.buckets.reduce(0) { $0 + $1.tokens.output } == total)
+        #expect(await index.sessions.contains { $0.id == "s1" })
+    }
+
     @Test func cacheRoundTrip() async throws {
         _ = seed()
         let first = TranscriptIndex(roots: roots, cacheURL: cacheURL)
@@ -86,6 +104,26 @@ import Testing
         let second = TranscriptIndex(roots: roots, cacheURL: cacheURL)
         #expect(await second.sessions.isEmpty)
         #expect(TranscriptIndex.cacheVersion > 1)
+    }
+
+    @Test func saveSkipsAnUnchangedIndex() async throws {
+        _ = seed()
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        try await index.save()
+        try FileManager.default.removeItem(at: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        try await index.save()
+        #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
+    }
+
+    @Test func cacheIsReadWhenFirstNeeded() async throws {
+        _ = seed()
+        let later = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        let first = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await first.refreshAll(progress: nil)
+        try await first.save()
+        #expect(await later.sessions.count == (await first.sessions).count)
     }
 
     @Test func progressReachesOne() async {
@@ -113,6 +151,44 @@ import Testing
         #if !DEBUG
         #expect(elapsed < .milliseconds(1500), "refreshAll impiega \(elapsed)")
         #endif
+    }
+}
+
+extension TranscriptIndexTests {
+    /// Codex tiene aperto il file di sessione: FSEvents non segnala le scritture finché non lo chiude,
+    /// quindi i file recenti si ricontrollano a intervalli.
+    @Test func pollsOpenCodexRollouts() async throws {
+        let day = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        let dir = String(format: "codex/%04d/%02d/%02d", day.year!, day.month!, day.day!)
+        let lines = text("codex-sample.jsonl").split(separator: "\n", omittingEmptySubsequences: true)
+        let half = lines.count / 2
+        let file = tmp.file("\(dir)/rollout-2026-10-27T10-00-00-01a1494b-8ccc-7553-99cb-df33363f95a1.jsonl",
+                            lines.prefix(half).joined(separator: "\n") + "\n")
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        let first = await index.refreshAll(progress: nil)
+        let before = try #require(first.changed.first).tokens.total
+        #expect(await index.pollCodex(now: Date()).changed.isEmpty)
+        let handle = try FileHandle(forWritingTo: file)
+        handle.seekToEndOfFile()
+        handle.write(Data((lines.dropFirst(half).joined(separator: "\n") + "\n").utf8))
+        try handle.close()
+        let polled = await index.pollCodex(now: Date().addingTimeInterval(1))
+        #expect(polled.changed.count == 1)
+        #expect(try #require(polled.changed.first).tokens.total > before)
+    }
+
+    /// Una sessione nata giorni fa ma ancora aperta: conta l'ultima modifica, non la cartella del giorno.
+    @Test func pollsRecentlyModifiedOlderRollouts() async throws {
+        let file = tmp.file("codex/2026/01/02/rollout-2026-01-02T10-00-00-01a1494b-8ccc-7553-99cb-df33363f95a1.jsonl",
+                            text("codex-sample.jsonl"))
+        let index = TranscriptIndex(roots: roots, cacheURL: cacheURL)
+        _ = await index.refreshAll(progress: nil)
+        let handle = try FileHandle(forWritingTo: file)
+        handle.seekToEndOfFile()
+        handle.write(Data("{\"type\":\"turn_context\",\"timestamp\":\"2026-01-02T10:05:00Z\",\"payload\":{\"model\":\"gpt-x\"}}\n".utf8))
+        try handle.close()
+        let polled = await index.pollCodex(now: Date().addingTimeInterval(1))
+        #expect(polled.changed.first?.model == "gpt-x")
     }
 }
 

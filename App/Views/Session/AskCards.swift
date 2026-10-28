@@ -29,10 +29,10 @@ struct PermissionCard: View {
                 Spacer()
                 Button("Nega") { host.answer(ask, allow: false) }
                     .buttonStyle(.bordered)
-                if !ask.alwaysRules.isEmpty {
-                    Button("Sempre in questo progetto") { host.answer(ask, allow: true, always: true) }
+                if let always = ask.always {
+                    Button(always.title) { host.answer(ask, allow: true, always: true) }
                         .buttonStyle(.bordered)
-                        .help("Claude Code aggiunge la regola a .claude/settings.local.json del progetto")
+                        .help(always.help)
                 }
                 Button("Consenti") { host.answer(ask, allow: true) }
                     .buttonStyle(.borderedProminent)
@@ -85,7 +85,7 @@ struct QuestionCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.bubble.fill").foregroundStyle(Theme.accent)
-                Text("Claude ha una domanda").font(.system(size: 13, weight: .semibold))
+                Text("\(Theme.agentName(host.agent)) ha una domanda").font(.system(size: 13, weight: .semibold))
             }
             ForEach(questions) { q in
                 VStack(alignment: .leading, spacing: 8) {

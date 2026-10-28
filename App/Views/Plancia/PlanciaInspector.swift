@@ -23,14 +23,21 @@ struct PlanciaInspector: View {
                     Text("Ultimi 14 giorni").font(.system(size: 10.5)).foregroundStyle(.tertiary)
                 }
 
-                Panel(title: "Limiti del piano") {
+                Panel(title: model.codexLimits == nil ? "Limiti del piano" : "Limiti di Claude") {
                     LimitRow(title: "Finestra 5 h", window: model.planLimits?.fiveHour, color: Theme.accent)
                     LimitRow(title: "Settimana", window: model.planLimits?.weekly, color: .primary)
                     if model.planLimits == nil {
-                        Text("Compaiono dopo la prima risposta di una sessione con la status line di Belvedere, o da Codex.")
+                        Text("Compaiono dopo la prima risposta di una sessione con la status line di Belvedere.")
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if let codex = model.codexLimits {
+                    Panel(title: "Limiti di Codex") {
+                        LimitRow(title: "Finestra 5 h", window: codex.fiveHour, color: Theme.codex)
+                        LimitRow(title: "Settimana", window: codex.weekly, color: .primary)
                     }
                 }
 

@@ -98,3 +98,38 @@ extension HookEvent {
         }
     }
 }
+
+extension HookEvent {
+    /// Lo stesso evento con l'id di richiesta di un suo doppione già arrivato.
+    public func with(requestID: String) -> HookEvent {
+        HookEvent(name: name, sessionID: sessionID, cwd: cwd, transcriptPath: transcriptPath, permissionMode: permissionMode,
+                  toolName: toolName, toolSummary: toolSummary, notificationType: notificationType, message: message,
+                  callerPID: callerPID, toolKey: toolKey, requestID: requestID, receivedAt: receivedAt)
+    }
+}
+
+/// Con i hook di Belvedere sia nelle impostazioni globali sia in quelle di un progetto, Claude manda ogni
+/// evento due volte, quasi insieme. Il doppione si riconosce dal contenuto: `PermissionRequest` non ha
+/// `tool_use_id` e i due id generati sarebbero diversi.
+public struct HookDeduplicator: Sendable {
+    /// I due hook partono in parallelo: oltre questo intervallo un evento uguale è un evento nuovo.
+    public static let window: TimeInterval = 3
+    private var recent: [String: (requestID: String, at: Date)] = [:]
+
+    public init() {}
+
+    /// `nil` per un evento nuovo; per un doppione, l'id di richiesta del primo.
+    public mutating func duplicate(of event: HookEvent, now: Date) -> String? {
+        recent = recent.filter { now.timeIntervalSince($0.value.at) < Self.window }
+        let key = [event.name, event.sessionID, event.toolKey ?? "", event.notificationType ?? "", event.message ?? "",
+                   event.callerPID.map(String.init) ?? ""].joined(separator: "\u{1F}")
+        if let seen = recent[key] { return seen.requestID }
+        recent[key] = (event.requestID, now)
+        return nil
+    }
+
+    /// Richiesta risposta: un evento uguale che arriva dopo è una richiesta nuova (lo stesso comando due volte).
+    public mutating func forget(requestID: String) {
+        recent = recent.filter { $0.value.requestID != requestID }
+    }
+}

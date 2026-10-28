@@ -31,7 +31,17 @@ public final class StreamProcess: @unchecked Sendable {
     public func start() throws -> AsyncStream<Event> {
         // Scrivere su un processo già uscito non deve chiudere Belvedere.
         signal(SIGPIPE, SIG_IGN)
-        try process.run()
+        // Un solo osservatore dell'uscita, su cui possono aspettare più thread
+        // (`waitUntilExit` da due thread insieme può non tornare).
+        let exited = DispatchGroup()
+        exited.enter()
+        process.terminationHandler = { _ in exited.leave() }
+        do {
+            try process.run()
+        } catch {
+            exited.leave()
+            throw error
+        }
         let (stream, continuation) = AsyncStream<Event>.makeStream()
         let errors = stderr.fileHandleForReading
         let tail = stderrTail
@@ -46,6 +56,22 @@ public final class StreamProcess: @unchecked Sendable {
         }
         let output = stdout.fileHandleForReading
         let process = self.process
+        let readerDone = DispatchSemaphore(value: 0)
+        let finish = Once()
+        let report: @Sendable () -> Void = {
+            finish.run {
+                _ = stderrDone.wait(timeout: .now() + StreamProcess.eofGrace)
+                let text = String(decoding: tail.data, as: UTF8.self)
+                continuation.yield(.exited(code: process.terminationStatus, stderr: text))
+                continuation.finish()
+            }
+        }
+        // Un nipote (un server MCP, il binario sotto il wrapper di Codex) può tenere aperto stdout
+        // dopo l'uscita: si aspetta l'EOF al massimo un attimo, poi l'uscita si segnala comunque.
+        DispatchQueue.global(qos: .utility).async {
+            exited.wait()
+            if readerDone.wait(timeout: .now() + StreamProcess.eofGrace) == .timedOut { report() }
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             var buffer = Data()
             while true {
@@ -64,14 +90,14 @@ public final class StreamProcess: @unchecked Sendable {
                 if start > 0 { buffer.removeSubrange(0..<start) }
             }
             if !buffer.isEmpty { continuation.yield(.line(buffer)) }
-            process.waitUntilExit()
-            stderrDone.wait()
-            let text = String(decoding: tail.data, as: UTF8.self)
-            continuation.yield(.exited(code: process.terminationStatus, stderr: text))
-            continuation.finish()
+            readerDone.signal()
+            exited.wait()
+            report()
         }
         return stream
     }
+
+    static let eofGrace: DispatchTimeInterval = .milliseconds(1500)
 
     public func send(_ data: Data) throws {
         guard process.isRunning else { throw ProcessError.notRunning }
@@ -79,15 +105,27 @@ public final class StreamProcess: @unchecked Sendable {
     }
 
     /// Chiude stdin, poi SIGINT; dopo `grace` SIGTERM e infine SIGKILL.
+    /// I discendenti (server MCP, il binario sotto un wrapper) si raccolgono prima, perché dopo
+    /// l'uscita del padre passano a launchd, e si chiudono anche loro.
     public func stop(grace: Duration = .seconds(2)) async {
         try? stdin.fileHandleForWriting.close()
         guard process.isRunning, let pid else { return }
+        let tree = ProcessTree.descendants(of: pid)
+        defer { Self.terminate(tree) }
         kill(pid, SIGINT)
         if await waitForExit(within: grace) { return }
         kill(pid, SIGTERM)
         if await waitForExit(within: .milliseconds(500)) { return }
         kill(pid, SIGKILL)
         _ = await waitForExit(within: .seconds(1))
+    }
+
+    private static func terminate(_ pids: [Int32]) {
+        let alive = pids.filter { kill($0, 0) == 0 }
+        guard !alive.isEmpty else { return }
+        alive.forEach { kill($0, SIGTERM) }
+        usleep(300_000)
+        alive.filter { kill($0, 0) == 0 }.forEach { kill($0, SIGKILL) }
     }
 
     private func waitForExit(within limit: Duration) async -> Bool {
@@ -97,6 +135,20 @@ public final class StreamProcess: @unchecked Sendable {
             try? await Task.sleep(for: .milliseconds(20))
         }
         return !process.isRunning
+    }
+
+    /// Esegue il blocco una volta sola, da qualunque thread.
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+
+        func run(_ body: () -> Void) {
+            let first = lock.withLock { () -> Bool in
+                defer { done = true }
+                return !done
+            }
+            if first { body() }
+        }
     }
 
     /// Ultimi 4 KB di stderr.

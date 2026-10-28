@@ -98,6 +98,32 @@ import Testing
         #expect(store.sessions.first?.pending != nil)
     }
 
+    /// La CLI calcola `total_cost_usd` con i prezzi di Claude anche su un modello locale: non è un costo.
+    @Test func localSessionsHaveNoCost() throws {
+        var store = LiveSessionStore()
+        store.apply(IndexUpdate(changed: [logSnapshot(status: .done)], newBuckets: []))
+        var hosted = SessionSnapshot(id: "s1", agent: .claude, cwd: "/p")
+        hosted.isLocalModel = true
+        hosted.costUSD = 0.06
+        hosted.lastActivity = Date()
+        store.setHosted(["s1"])
+        store.apply(hosted: hosted)
+        #expect(try #require(store.sessions.first).costUSD == nil)
+        var state = ChatState(isLocal: true)
+        state.sessionID = "s2"
+        #expect(state.snapshot(launchedAt: nil)?.isLocalModel == true)
+    }
+
+    /// Anche una sessione locale vista solo dal log (`cost-state` scritto dalla CLI) non ha un costo.
+    @Test func localSessionFromLogHasNoCost() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .done)
+        log.isLocalModel = true
+        log.costUSD = 0.12
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        #expect(try #require(store.sessions.first).costUSD == nil)
+    }
+
     @Test func hostedOverlayWins() throws {
         var store = LiveSessionStore()
         var log = logSnapshot(status: .done)
@@ -207,6 +233,80 @@ import Testing
         #expect(store.sessions.first?.contextTokens == 250_000)
     }
 
+    /// Il log non dice la finestra: quella vista per lo stesso modello in un'altra sessione vale anche qui,
+    /// per esempio per una sessione ripresa in Belvedere prima del suo primo turno.
+    @Test func knownModelWindowAppliesBeforeFirstTurn() throws {
+        var store = LiveSessionStore()
+        var first = logSnapshot("a", status: .done)
+        first.model = "claude-haiku-5-5"
+        var second = logSnapshot("b", status: .done)
+        second.model = "claude-haiku-5-5"
+        var other = logSnapshot("c", status: .done)
+        other.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [first, second, other], newBuckets: []))
+        var hosted = SessionSnapshot(id: "a", agent: .claude, cwd: "/p")
+        hosted.model = "claude-haiku-5-5"
+        hosted.contextWindow = 1_000_000
+        hosted.lastActivity = Date()
+        store.setHosted(["a"])
+        store.apply(hosted: hosted)
+        let byID = Dictionary(uniqueKeysWithValues: store.sessions.map { ($0.id, $0) })
+        #expect(byID["b"]?.contextWindow == 1_000_000)
+        #expect(byID["c"]?.contextWindow == 200_000)
+        #expect(store.knownWindows == ["claude-haiku-5-5": 1_000_000])
+
+        var restored = LiveSessionStore()
+        restored.restore(knownWindows: store.knownWindows)
+        restored.apply(IndexUpdate(changed: [second], newBuckets: []))
+        #expect(restored.sessions.first?.contextWindow == 1_000_000)
+    }
+
+    @Test func statusLineTeachesTheModelWindow() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .working, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-opus-5-5"},"context_window":{"used_percentage":25,"context_window_size":1000000}}"#.utf8), now: Date()))
+        #expect(store.knownWindows == ["claude-opus-5-5": 1_000_000])
+    }
+
+    /// La variante da 1M ha un suo id (`…[1m]`): non vale per i log del modello da 200k.
+    @Test func oneMillionVariantDoesNotWidenPlainLogs() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .done, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-opus-5-5[1m]"},"context_window":{"context_window_size":1000000}}"#.utf8), now: Date().addingTimeInterval(-120)))
+        var other = logSnapshot("s2", status: .done, at: Date())
+        other.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [other], newBuckets: []))
+        #expect(store.sessions.first { $0.id == "s2" }?.contextWindow == 200_000)
+    }
+
+    /// Dopo `/model` la status line parla del modello nuovo, non di quello scritto nel log.
+    @Test func statusLineTeachesItsOwnModel() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .working, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-haiku-5-5"},"context_window":{"context_window_size":1000000}}"#.utf8), now: Date()))
+        #expect(store.knownWindows == ["claude-haiku-5-5": 1_000_000])
+    }
+
+    /// Lo stesso modello visto con due finestre diverse: non si sa quale valga per un log, resta la stima.
+    @Test func conflictingWindowsAreNotApplied() throws {
+        var store = LiveSessionStore()
+        store.restore(knownWindows: ["claude-opus-5-5": 1_000_000])
+        var log = logSnapshot(status: .working, at: Date().addingTimeInterval(-60))
+        log.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        store.apply(try StatusLinePayload.decode(Data(#"{"session_id":"s1","model":{"id":"claude-opus-5-5"},"context_window":{"context_window_size":200000}}"#.utf8), now: Date().addingTimeInterval(-120)))
+        var other = logSnapshot("s2", status: .done, at: Date())
+        other.model = "claude-opus-5-5"
+        store.apply(IndexUpdate(changed: [other], newBuckets: []))
+        #expect(store.sessions.first { $0.id == "s2" }?.contextWindow == 200_000)
+    }
+
     @Test func sortsWaitingThenWorkingThenRecent() {
         var store = LiveSessionStore()
         let now = Date()
@@ -226,22 +326,25 @@ import Testing
                                weekly: nil, observedAt: now.addingTimeInterval(-300))
         store.apply(claudeLimits: saved)
         store.tick(now: now)
-        #expect(store.planLimits == saved)
+        #expect(store.planLimits(.claude) == saved)
         #expect(store.claudeLimits == saved)
     }
 
-    @Test func planLimitsPickNewestAndDropExpired() throws {
+    /// Claude e Codex sono due piani diversi: i limiti restano separati, anche se quelli di Codex sono più recenti.
+    @Test func planLimitsStaySeparateAndDropExpired() throws {
         var store = LiveSessionStore()
         let now = Date()
         store.apply(codexLimits: PlanLimits(fiveHour: LimitWindow(usedPercent: 10, resetsAt: now.addingTimeInterval(3600)),
-                                            weekly: nil, observedAt: now.addingTimeInterval(-600)))
-        #expect(store.planLimits?.fiveHour?.usedPercent == 10)
+                                            weekly: nil, observedAt: now))
+        #expect(store.planLimits(.claude) == nil)
+        #expect(store.planLimits(.codex)?.fiveHour?.usedPercent == 10)
         let json = #"{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":62,"resets_at":\#(Int(now.timeIntervalSince1970) - 10)},"seven_day":{"used_percentage":30,"resets_at":\#(Int(now.timeIntervalSince1970) + 86400)}}}"#
-        store.apply(try StatusLinePayload.decode(Data(json.utf8), now: now))
+        store.apply(try StatusLinePayload.decode(Data(json.utf8), now: now.addingTimeInterval(-60)))
         store.tick(now: now)
-        let limits = try #require(store.planLimits)
+        let limits = try #require(store.planLimits(.claude))
         #expect(limits.fiveHour == nil)
         #expect(limits.weekly?.usedPercent == 30)
+        #expect(store.planLimits(.codex)?.fiveHour?.usedPercent == 10)
     }
 }
 

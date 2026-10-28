@@ -3,6 +3,7 @@ import Foundation
 /// Il JSON che Claude Code passa al comando della status line.
 public struct StatusLinePayload: Sendable {
     public let sessionID: String
+    public let modelID: String?
     public let modelDisplayName: String?
     public let cwd: String?
     public let contextUsedPercent: Double?
@@ -25,6 +26,7 @@ public struct StatusLinePayload: Sendable {
         let weekly = window(rates["seven_day"])
         return StatusLinePayload(
             sessionID: sessionID,
+            modelID: (obj["model"] as? [String: Any])?["id"] as? String,
             modelDisplayName: (obj["model"] as? [String: Any])?["display_name"] as? String,
             cwd: (obj["workspace"] as? [String: Any])?["current_dir"] as? String ?? obj["cwd"] as? String,
             contextUsedPercent: (context["used_percentage"] as? NSNumber)?.doubleValue,

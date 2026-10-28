@@ -9,12 +9,20 @@ public enum ClaudeCommand {
         baseArguments + variableArguments(o, isGitRepository: isGitRepository)
     }
 
+    /// Variabili che una sessione Claude genitore passa ai propri figli: non valgono per una sessione nuova.
+    /// Le altre `CLAUDE_CODE_*` sono impostazioni dell'utente e restano.
+    static let parentSessionVariables: Set<String> = [
+        "CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+        // Modalità bare di un genitore lanciato con `--bare`: Belvedere non la usa mai.
+        "CLAUDE_CODE_SIMPLE",
+    ]
+
     /// Variabili del processo: via quelle di una sessione Claude genitore, e per i modelli locali
     /// l'indirizzo di LM Studio. Nessun file di configurazione viene toccato.
     public static func environment(_ o: LaunchOptions, base: [String: String]) -> [String: String] {
-        var env = base.filter { key, _ in
-            !(key == "CLAUDECODE" || key == "CLAUDE_PID" || key == "CLAUDE_EFFORT" || key.hasPrefix("CLAUDE_CODE_"))
-        }
+        var env = base.filter { key, _ in !parentSessionVariables.contains(key) }
         if let local = o.local {
             env["ANTHROPIC_BASE_URL"] = "http://localhost:1234"
             env["ANTHROPIC_AUTH_TOKEN"] = "lmstudio"
@@ -42,7 +50,7 @@ public enum ClaudeCommand {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    private static func quoteIfNeeded(_ s: String) -> String {
+    static func quoteIfNeeded(_ s: String) -> String {
         s.allSatisfy { $0.isLetter || $0.isNumber || "-_./:=@".contains($0) } ? s : quote(s)
     }
 
@@ -76,10 +84,11 @@ public enum GitInfo {
 
 public enum LaunchAdvice {
     /// Avviso per i modelli locali con contesto piccolo.
-    public static func contextWarning(_ contextLength: Int?) -> String? {
+    public static func contextWarning(_ contextLength: Int?, agent: AgentKind = .claude) -> String? {
         guard let n = contextLength, n < 65_536 else { return nil }
         let formatted = n.formatted(.number.locale(Locale(identifier: "it_IT")))
-        return "Contesto di \(formatted) token: Claude Code ne usa circa 20k solo per istruzioni e strumenti."
+        let overhead = agent == .claude ? "20k" : "9k"
+        return "Contesto di \(formatted) token: \(agent.productName) ne usa circa \(overhead) solo per istruzioni e strumenti."
     }
 }
 
@@ -89,10 +98,16 @@ public enum TerminalHandoff {
     /// `environment` porta le variabili di un modello locale, così la sessione non passa al cloud.
     public static func script(cwd: String, sessionID: String, binary: String, pidFile: String,
                               environment: [String: String] = [:]) -> String {
+        script(cwd: cwd, arguments: [binary, "--resume", sessionID], pidFile: pidFile, environment: environment)
+    }
+
+    /// Come sopra, con la riga di comando completa (`codex resume <id>` per Codex).
+    public static func script(cwd: String, arguments: [String], pidFile: String,
+                              environment: [String: String] = [:]) -> String {
         let exports = environment.sorted { $0.key < $1.key }
             .map { "export \($0.key)=\(ClaudeCommand.quote($0.value))\n" }.joined()
         return "#!/bin/zsh\necho $$ > \(ClaudeCommand.quote(pidFile))\n" + exports
-            + "cd \(ClaudeCommand.quote(cwd)) && exec \(ClaudeCommand.quote(binary)) --resume \(ClaudeCommand.quote(sessionID))\n"
+            + "cd \(ClaudeCommand.quote(cwd)) && exec \(arguments.map(ClaudeCommand.quote).joined(separator: " "))\n"
     }
 
     /// Il processo aperto dallo script è ancora vivo (anche se fermo su una domanda del terminale).

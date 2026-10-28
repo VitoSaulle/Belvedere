@@ -6,6 +6,22 @@ public struct LMStudioModel: Sendable, Equatable {
     public let contextLength: Int?
 }
 
+extension LMStudioModel {
+    /// Per le sessioni locali il log riporta la finestra dichiarata dall'agente (per Codex finta):
+    /// se il modello è caricato in LM Studio vale il contesto con cui è stato caricato.
+    public static func applyLoadedContext(to sessions: [SessionSnapshot], models: [LMStudioModel]) -> [SessionSnapshot] {
+        let loaded = Dictionary(models.filter(\.loaded).compactMap { m in m.contextLength.map { (m.id, $0) } },
+                                uniquingKeysWith: { a, _ in a })
+        guard !loaded.isEmpty else { return sessions }
+        return sessions.map { s in
+            guard s.isLocalModel, let model = s.model, let context = loaded[model] else { return s }
+            var copy = s
+            copy.contextWindow = context
+            return copy
+        }
+    }
+}
+
 public struct LMStudioStatus: Sendable, Equatable {
     public let reachable: Bool
     public let models: [LMStudioModel]
@@ -26,7 +42,7 @@ public actor LMStudioMonitor {
     public func poll() async -> LMStudioStatus {
         if let data = await get("/api/v0/models") {
             return LMStudioStatus(reachable: true, models: Self.models(data) { item in
-                (item["state"] as? String == "loaded", (item["max_context_length"] as? NSNumber)?.intValue)
+                (item["state"] as? String == "loaded", ((item["loaded_context_length"] ?? item["max_context_length"]) as? NSNumber)?.intValue)
             })
         }
         if let data = await get("/v1/models") {

@@ -10,6 +10,26 @@ import Testing
     }
     private var all: [Data] { Fixture.lines("claude-sample.jsonl") }
 
+    /// Fuori da un repository Claude Code scrive `gitBranch: "HEAD"`: non è un ramo da mostrare.
+    @Test func ignoresHeadAsBranch() {
+        let line = Data(#"{"type":"user","sessionId":"s1","cwd":"/p","gitBranch":"HEAD","timestamp":"2026-10-28T10:00:00.000Z","message":{"role":"user","content":"ciao"}}"#.utf8)
+        #expect(reduced([line]).snapshot.gitBranch == nil)
+    }
+
+    /// Un subagente «fork» comincia con la copia del messaggio della madre che lo ha lanciato:
+    /// quei token sono già contati nella madre.
+    @Test func forkCopyOfParentMessageIsNotCounted() {
+        let lines = [
+            #"{"type":"fork-context-ref","agentId":"a1","parentSessionId":"p","parentLastUuid":"u0","contextLength":2}"#,
+            #"{"type":"assistant","timestamp":"2026-10-28T10:00:00.000Z","message":{"id":"msg_parent","model":"claude-opus-5-5","usage":{"input_tokens":5,"output_tokens":7,"cache_read_input_tokens":100,"cache_creation_input_tokens":0},"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{}}]}}"#,
+            #"{"type":"user","timestamp":"2026-10-28T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Fork started"}]}}"#,
+            #"{"type":"assistant","timestamp":"2026-10-28T10:00:02.000Z","message":{"id":"msg_fork","model":"claude-opus-5-5","usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":10,"cache_creation_input_tokens":0},"content":[{"type":"text","text":"ok"}]}}"#,
+        ].map { Data($0.utf8) }
+        var r = reduced(lines)
+        #expect(r.snapshot.tokens == TokenTotals(input: 1, output: 2, cacheRead: 10, cacheWrite: 0))
+        #expect(r.drainUsage().reduce(TokenTotals()) { $0 + $1.tokens } == TokenTotals(input: 1, output: 2, cacheRead: 10, cacheWrite: 0))
+    }
+
     @Test func countsEachMessageOnce() {
         let s = reduced(all).snapshot
         #expect(s.tokens == TokenTotals(input: 18, output: 90, cacheRead: 4500, cacheWrite: 650))
@@ -26,7 +46,8 @@ import Testing
     @Test func readsTitleCostBranchModel() {
         let s = reduced(all).snapshot
         #expect(s.title == "Export CSV dei report")
-        #expect(s.costUSD == 4.18)
+        // Token × listino di Opus 5.5, non il `cost-state` della CLI (4,18), che riparte da zero dopo una compattazione.
+        #expect(abs((s.costUSD ?? 0) - 0.007972) < 1e-9)
         #expect(s.gitBranch == "feat/csv")
         #expect(s.model == "claude-opus-5-5")
         #expect(s.isLocalModel == false)
@@ -40,6 +61,28 @@ import Testing
         #expect(s.filesChanged.map(\.path) == ["/Users/v/proj/Report.java"])
         #expect(s.filesChanged.first?.added == 3)
         #expect(s.filesChanged.first?.removed == 1)
+    }
+
+    /// Un file conta come modificato solo quando lo strumento è andato a buon fine:
+    /// una scrittura negata (o interrotta) non ha toccato il disco.
+    @Test func deniedWriteIsNotAChangedFile() {
+        let lines = [
+            #"{"type":"assistant","timestamp":"2026-10-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"/p/nota.txt","content":"ciao"}},{"type":"tool_use","id":"w2","name":"Write","input":{"file_path":"/p/ok.txt","content":"a\nb"}}]}}"#,
+            #"{"type":"user","timestamp":"2026-10-28T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"w1","is_error":true,"content":"The user doesn't want to proceed with this tool use."},{"type":"tool_result","tool_use_id":"w2","content":"File created"}]}}"#,
+        ].map { Data($0.utf8) }
+        let s = reduced(lines).snapshot
+        #expect(s.filesChanged == [FileChange(path: "/p/ok.txt", added: 2, removed: 0)])
+        #expect(s.toolCounts == ["Write": 2])
+    }
+
+    /// Lo strumento in attesa di risposta sopravvive alla cache: il risultato può arrivare dopo.
+    @Test func pendingEditSurvivesEncoding() throws {
+        let use = Data(#"{"type":"assistant","timestamp":"2026-10-28T10:00:00.000Z","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"/p/a.txt","content":"x"}}]}}"#.utf8)
+        let result = Data(#"{"type":"user","timestamp":"2026-10-28T10:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"w1","content":"ok"}]}}"#.utf8)
+        var r = try JSONDecoder().decode(ClaudeReducer.self, from: JSONEncoder().encode(reduced([use])))
+        #expect(r.snapshot.filesChanged.isEmpty)
+        r.consume(result)
+        #expect(r.snapshot.filesChanged.map(\.path) == ["/p/a.txt"])
     }
 
     @Test func statusFromLastLine() {

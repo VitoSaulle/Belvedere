@@ -65,6 +65,60 @@ import Testing
         #expect(kill(pid, 0) != 0)
     }
 
+    private func shell(_ script: String) -> StreamProcess {
+        StreamProcess(executable: "/bin/sh", arguments: ["-c", script],
+                      environment: ProcessInfo.processInfo.environment, directory: NSTemporaryDirectory())
+    }
+
+    private static func alive(_ pid: Int32) -> Bool { kill(pid, 0) == 0 }
+
+    /// I server MCP sono figli di claude: fermare la sessione non deve lasciarli in giro.
+    @Test func stopKillsDescendants() async throws {
+        let process = shell("sleep 60 & echo $!; wait")
+        let events = try process.start()
+        var child: Int32?
+        for await event in events {
+            if case .line(let data) = event { child = Int32(String(decoding: data, as: UTF8.self)); break }
+        }
+        let pid = try #require(child)
+        #expect(Self.alive(pid))
+        await process.stop(grace: .milliseconds(200))
+        for _ in 0..<20 where Self.alive(pid) { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(!Self.alive(pid))
+    }
+
+    /// Un nipote che tiene aperto stdout non deve impedire di sapere che il processo è uscito.
+    @Test func exitIsReportedWhenGrandchildHoldsStdout() async throws {
+        let process = shell("sleep 30 & echo $!; exit 3")
+        let events = try process.start()
+        var grandchild: Int32?
+        var code: Int32?
+        let clock = ContinuousClock()
+        let elapsed = await clock.measure {
+            for await event in events {
+                switch event {
+                case .line(let data): grandchild = Int32(String(decoding: data, as: UTF8.self))
+                case .exited(let c, _): code = c
+                }
+            }
+        }
+        if let grandchild { kill(grandchild, SIGKILL) }
+        #expect(code == 3)
+        #expect(elapsed < .seconds(5))
+    }
+
+    @Test func listsDescendants() async throws {
+        let process = shell("sleep 60 & echo $!; wait")
+        let events = try process.start()
+        var child: Int32?
+        for await event in events {
+            if case .line(let data) = event { child = Int32(String(decoding: data, as: UTF8.self)); break }
+        }
+        let parent = try #require(process.pid)
+        #expect(ProcessTree.descendants(of: parent).contains(try #require(child)))
+        await process.stop(grace: .milliseconds(200))
+    }
+
     @Test func missingExecutableThrows() {
         let process = StreamProcess(executable: "/nonexistent/claude", arguments: [], environment: [:], directory: "/")
         #expect(throws: (any Error).self) { _ = try process.start() }

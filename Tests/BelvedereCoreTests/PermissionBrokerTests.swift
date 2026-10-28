@@ -35,6 +35,31 @@ import Testing
         #expect(elapsed < .milliseconds(500))
     }
 
+    /// Hook globale e hook di progetto mandano la stessa richiesta due volte: la risposta vale per entrambe.
+    @Test func duplicateWaitsGetTheSameAnswer() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        async let first = broker.decision(for: "r1")
+        try await Task.sleep(for: .milliseconds(30))
+        async let second = broker.decision(for: "r1")
+        try await Task.sleep(for: .milliseconds(30))
+        await broker.resolve(requestID: "r1", with: .allow)
+        #expect(await first == .allow)
+        #expect(await second == .allow)
+    }
+
+    /// Se uno dei due hook si chiude, l'altro resta in attesa.
+    @Test func cancellingOneDuplicateKeepsTheOther() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        let first = Task { await broker.decision(for: "r1") }
+        try await Task.sleep(for: .milliseconds(30))
+        async let second = broker.decision(for: "r1")
+        try await Task.sleep(for: .milliseconds(30))
+        first.cancel()
+        #expect(await first.value == nil)
+        await broker.resolve(requestID: "r1", with: .allow)
+        #expect(await second == .allow)
+    }
+
     @Test func cancelReleasesOnlyThatRequest() async throws {
         let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
         async let a = broker.decision(for: "a")
@@ -44,6 +69,41 @@ import Testing
         #expect(await a == nil)
         await broker.resolve(requestID: "b", with: .allow)
         #expect(await b == .allow)
+    }
+
+    @Test func answerBeforeTheWaitIsKept() async {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        await broker.resolve(requestID: "r1", with: .deny(reason: "no"))
+        #expect(await broker.decision(for: "r1") == .deny(reason: "no"))
+    }
+
+    /// Il doppione che arriva a chiedere dopo che il primo ha già avuto la risposta non resta appeso.
+    @Test func lateDuplicateGetsTheAnswerToo() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        async let first = broker.decision(for: "r1")
+        try await Task.sleep(for: .milliseconds(50))
+        await broker.resolve(requestID: "r1", with: .allow)
+        #expect(await first == .allow)
+        #expect(await broker.decision(for: "r1") == .allow)
+    }
+
+    /// Risposta data prima che i due doppioni aspettino: la ricevono entrambi.
+    @Test func earlyAnswerServesBothDuplicates() async {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 5))
+        await broker.resolve(requestID: "r1", with: .deny(reason: "no"))
+        #expect(await broker.decision(for: "r1") == .deny(reason: "no"))
+        #expect(await broker.decision(for: "r1") == .deny(reason: "no"))
+    }
+
+    @Test func oldTimerDoesNotCloseANewWait() async throws {
+        let broker = PermissionBroker(policy: .hold(timeoutSeconds: 0.3))
+        async let first = broker.decision(for: "r1")
+        try await Task.sleep(for: .milliseconds(200))
+        async let second = broker.decision(for: "r1")
+        #expect(await first == nil)
+        try await Task.sleep(for: .milliseconds(150))
+        await broker.resolve(requestID: "r1", with: .allow)
+        #expect(await second == .allow)
     }
 
     @Test func observeOnlyReturnsImmediately() async {

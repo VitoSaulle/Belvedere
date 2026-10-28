@@ -37,8 +37,18 @@ public struct PermissionAsk: Equatable, Sendable, Identifiable {
     public let input: JSONValue
     public let description: String?
     public let suggestions: [JSONValue]
+    /// Approvazione permanente offerta da Codex (per un comando, o per la sessione).
+    var codexAlways: AlwaysOption? = nil
 
     public var isQuestion: Bool { toolName == "AskUserQuestion" }
+
+    /// Il terzo pulsante, se l'agente lo offre: «Sempre in questo progetto» per Claude Code.
+    public var always: AlwaysOption? {
+        if let codexAlways { return codexAlways }
+        guard !alwaysRules.isEmpty else { return nil }
+        return AlwaysOption(title: "Sempre in questo progetto",
+                            help: "Claude Code aggiunge la regola a .claude/settings.local.json del progetto")
+    }
 
     /// Regole che la CLI salva da sé in `.claude/settings.local.json` («Sempre in questo progetto»).
     public var alwaysRules: [JSONValue] { suggestions.filter { $0["type"]?.stringValue == "addRules" } }
@@ -50,6 +60,11 @@ public struct PermissionAsk: Equatable, Sendable, Identifiable {
         object["answers"] = .object(answers.mapValues(JSONValue.string))
         return .allow(input: .object(object), rules: [])
     }
+}
+
+public struct AlwaysOption: Equatable, Sendable {
+    public let title: String
+    public let help: String
 }
 
 public struct TurnResult: Equatable, Sendable {

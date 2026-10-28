@@ -34,6 +34,9 @@ public struct LiveSessionStore: Sendable {
     private var hosted: [String: SessionSnapshot] = [:]
     /// Ultimi limiti letti dalla status line: l'app li salva e li ripristina all'avvio.
     public private(set) var claudeLimits: PlanLimits?
+    /// Finestra di contesto per modello Claude, vista da status line e chat ospitate: il log non la dice.
+    /// L'app la salva e la ripristina all'avvio.
+    public private(set) var knownWindows: [String: Int] = [:]
     private var now: Date = .distantPast
 
     public init() {}
@@ -95,6 +98,8 @@ public struct LiveSessionStore: Sendable {
         let at = status.limits?.observedAt ?? Date()
         advance(to: at)
         statusLines[status.sessionID] = StatusLineState(payload: status, at: at)
+        // L'id della status line è quello in uso (dopo `/model`) e distingue la variante `[1m]`.
+        if let model = status.modelID { learnWindow(status.contextWindowSize, for: model) }
         if let limits = status.limits { claudeLimits = limits }
     }
 
@@ -108,7 +113,19 @@ public struct LiveSessionStore: Sendable {
     public mutating func apply(hosted snapshot: SessionSnapshot) {
         guard hostedIDs.contains(snapshot.id) || exitedIDs.contains(snapshot.id) else { return }
         hosted[snapshot.id] = snapshot
+        if let model = snapshot.model, !snapshot.isLocalModel { learnWindow(snapshot.contextWindow, for: model) }
         if let date = snapshot.lastActivity { advance(to: date) }
+    }
+
+    public mutating func restore(knownWindows windows: [String: Int]) {
+        knownWindows = windows
+    }
+
+    private mutating func learnWindow(_ window: Int?, for model: String) {
+        guard let window, window > 0, !ModelInfo.isLocal(claudeModel: model) else { return }
+        // Lo stesso id visto con due finestre: per un log non si sa quale valga, 0 = non applicare.
+        if let known = knownWindows[model], known != window { knownWindows[model] = 0; return }
+        knownWindows[model] = window
     }
 
     public mutating func apply(claudeLimits limits: PlanLimits?) {
@@ -147,9 +164,9 @@ public struct LiveSessionStore: Sendable {
 
     public var waitingCount: Int { sessions.filter { $0.status == .waiting }.count }
 
-    public var planLimits: PlanLimits? {
-        let newest = [claudeLimits, codexLimits].compactMap { $0 }.max { $0.observedAt < $1.observedAt }
-        guard var limits = newest else { return nil }
+    /// Limiti del piano di un agente, senza le finestre già azzerate.
+    public func planLimits(_ agent: AgentKind) -> PlanLimits? {
+        guard var limits = agent == .claude ? claudeLimits : codexLimits else { return nil }
         let isExpired = { (w: LimitWindow?) in w?.resetsAt.map { $0 < now } ?? false }
         if isExpired(limits.fiveHour) { limits.fiveHour = nil }
         if isExpired(limits.weekly) { limits.weekly = nil }
@@ -163,6 +180,10 @@ public struct LiveSessionStore: Sendable {
         var s: SessionSnapshot
         if let log = logs[id] {
             s = log
+            if s.agent == .claude, !s.isLocalModel, let model = s.model, let known = knownWindows[model],
+               known > (s.contextWindow ?? 0) {
+                s.contextWindow = known
+            }
         } else if let hook {
             s = SessionSnapshot(id: id, agent: .claude, cwd: hook.cwd ?? "", transcriptPath: hook.transcriptPath ?? "")
             s.lastActivity = hook.statusAt
@@ -197,7 +218,7 @@ public struct LiveSessionStore: Sendable {
                     s.contextTokens = Int((percent / 100 * Double(size)).rounded())
                 }
             }
-            if let cost = line.payload.costUSD { s.costUSD = cost }
+            if s.costUSD == nil, let cost = line.payload.costUSD { s.costUSD = cost }
         }
         let quiet = now.timeIntervalSince(s.lastActivity ?? .distantPast)
         if s.status == .working, quiet > Self.workingTimeout { s.status = .idle }
@@ -216,11 +237,14 @@ public struct LiveSessionStore: Sendable {
             if let model = live.model { s.model = model }
             if let tokens = live.contextTokens { s.contextTokens = tokens }
             if let window = live.contextWindow { s.contextWindow = window }
-            if let cost = live.costUSD { s.costUSD = cost }
+            if s.costUSD == nil, let cost = live.costUSD { s.costUSD = cost }
+            if live.isLocalModel { s.isLocalModel = true }
             if let text = live.lastText { s.lastText = text }
             if s.cwd.isEmpty { s.cwd = live.cwd }
             if (s.lastActivity ?? .distantPast) < (live.lastActivity ?? .distantPast) { s.lastActivity = live.lastActivity }
         }
+        // La CLI calcola il costo con i prezzi di Claude anche per un modello locale: non è un costo.
+        if s.isLocalModel { s.costUSD = nil }
         return s
     }
 

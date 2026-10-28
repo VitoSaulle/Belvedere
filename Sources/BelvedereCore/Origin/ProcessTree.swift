@@ -21,4 +21,21 @@ public enum ProcessTree {
         }
         return chain
     }
+
+    /// Figli, nipoti e così via, dal più vicino; letti con libproc.
+    public static func descendants(of pid: Int32, limit: Int = 256) -> [Int32] {
+        var result: [Int32] = []
+        var queue = [pid]
+        while let current = queue.first, result.count < limit {
+            queue.removeFirst()
+            var children = [pid_t](repeating: 0, count: 64)
+            // Restituisce il numero di PID, non di byte.
+            let count = proc_listchildpids(current, &children, Int32(children.count * MemoryLayout<pid_t>.size))
+            for child in children.prefix(Swift.min(Int(Swift.max(count, 0)), children.count)) where child > 0 && !result.contains(child) {
+                result.append(child)
+                queue.append(child)
+            }
+        }
+        return result
+    }
 }

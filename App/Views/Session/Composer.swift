@@ -9,6 +9,7 @@ struct Composer: View {
     @State private var text = ""
     @State private var terminalOnly: String?
     @State private var files: [String] = []
+    @State private var showErrorDetail = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -35,7 +36,7 @@ struct Composer: View {
 
     private var field: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField("Scrivi a Claude, / per i comandi, @ per i file", text: $text, axis: .vertical)
+            TextField("Scrivi a \(Theme.agentName(host.agent)), / per i comandi, @ per i file", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
                 .lineLimit(1...8)
@@ -65,7 +66,7 @@ struct Composer: View {
             .buttonStyle(.plain)
             .fixedSize()
             .help("Altre azioni")
-            if host.state.status == .working {
+            if host.state.status == .working || host.state.status == .waiting {
                 Button { host.interrupt() } label: {
                     Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold))
                         .frame(width: 28, height: 28)
@@ -98,9 +99,17 @@ struct Composer: View {
         let message = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return }
         terminalOnly = nil
-        if case .terminalOnly(let name) = host.send(message) {
+        switch host.send(message) {
+        case .terminalOnly(let name):
             terminalOnly = name
             return
+        case .plugins where host.agent == .claude:
+            model.showPlugins = true
+        case .plugins:
+            terminalOnly = "plugin"
+            return
+        default:
+            break
         }
         text = ""
     }
@@ -180,10 +189,22 @@ struct Composer: View {
     // MARK: - Avvisi
 
     private func banner(_ error: String) -> some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.danger)
             Text(error).font(.system(size: 12.5)).lineLimit(3).textSelection(.enabled)
             Spacer()
+            if let detail = host.state.errorDetail {
+                Button("Dettagli") { showErrorDetail = true }
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .popover(isPresented: $showErrorDetail) {
+                        ScrollView {
+                            Text(detail).font(.system(size: 11.5, design: .monospaced)).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        }
+                        .frame(width: 520, height: 320)
+                    }
+            }
             if !host.isRunning {
                 Button("Riavvia") { host.restart() }.buttonStyle(.bordered).buttonBorderShape(.capsule)
             }

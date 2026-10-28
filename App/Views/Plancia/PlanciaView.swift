@@ -54,39 +54,56 @@ struct PlanciaView: View {
         }
     }
 
+    /// Su una riga se c'è spazio, altrimenti i comandi vanno sotto il titolo: le etichette del filtro
+    /// non si troncano mai.
     private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Plancia").font(.system(size: 26, weight: .bold))
-                Text(summary).font(.system(size: 13)).foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 14) {
+                titleBlock
+                Spacer(minLength: 14)
+                controls
             }
-            Spacer()
-            FilterPicker(selection: $filter)
-            Button { model.showNewSession = true } label: {
-                Label("Nuova sessione", systemImage: "plus")
-                    .font(.system(size: 12.5, weight: .semibold))
+            VStack(alignment: .leading, spacing: 12) {
+                titleBlock
+                HStack(spacing: 14) { controls }
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .tint(Theme.accent)
-            .help("Nuova sessione (⌘N)")
-            Menu {
-                let stale = model.staleSessionIDs
-                Button("Nascondi le concluse da più di 7 giorni (\(stale.count))") { model.hide(stale) }
-                    .disabled(stale.isEmpty)
-                if !model.hiddenSessions.isEmpty {
-                    SettingsLink { Text("Sessioni nascoste (\(model.hiddenSessions.count))…") }
-                }
-            } label: {
-                Image(systemName: "ellipsis").frame(width: 30, height: 30)
-            }
-            .menuStyle(.button)
-            .menuIndicator(.hidden)
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .circle)
-            .help("Altre azioni")
         }
         .padding(.top, 8)
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Plancia").font(.system(size: 26, weight: .bold))
+            Text(summary).font(.system(size: 13)).foregroundStyle(.secondary)
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder private var controls: some View {
+        FilterPicker(selection: $filter)
+        Button { model.showNewSession = true } label: {
+            Label("Nuova sessione", systemImage: "plus")
+                .font(.system(size: 12.5, weight: .semibold))
+        }
+        .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.capsule)
+        .tint(Theme.accent)
+        .help("Nuova sessione (⌘N)")
+        Menu {
+            let stale = model.staleSessionIDs
+            Button("Nascondi le concluse da più di 7 giorni (\(stale.count))") { model.hide(stale) }
+                .disabled(stale.isEmpty)
+            if !model.hiddenSessions.isEmpty {
+                SettingsLink { Text("Sessioni nascoste (\(model.hiddenSessions.count))…") }
+            }
+        } label: {
+            Image(systemName: "ellipsis").frame(width: 30, height: 30)
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .circle)
+        .help("Altre azioni")
     }
 
     private var summary: String {
@@ -143,6 +160,7 @@ struct FilterPicker: View {
                 } label: {
                     Text(item.rawValue)
                         .font(.system(size: 12.5, weight: .medium))
+                        .fixedSize()
                         .foregroundStyle(selection == item ? Color.primary : Color.secondary)
                         .padding(.horizontal, 13)
                         .frame(height: 28)

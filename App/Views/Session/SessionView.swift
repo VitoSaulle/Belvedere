@@ -31,7 +31,7 @@ struct SessionView: View {
 /// Sessione appena lanciata: Claude non ha ancora comunicato il suo id.
 @MainActor private func placeholder(_ host: HostedSession) -> SessionSnapshot? {
     if let snapshot = host.state.snapshot(launchedAt: host.launchedAt) { return snapshot }
-    var s = SessionSnapshot(id: AppModel.provisionalPrefix + host.id.uuidString, agent: .claude, cwd: host.options.folder)
+    var s = SessionSnapshot(id: AppModel.provisionalPrefix + host.id.uuidString, agent: host.agent, cwd: host.options.folder)
     s.status = host.isRunning ? .working : .idle
     s.model = host.options.local?.id ?? host.options.model
     s.isLocalModel = host.options.local != nil
@@ -105,7 +105,7 @@ struct ReadOnlyBar: View {
                 }
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
-                .help("Riprende la conversazione qui con claude --resume")
+                .help(session.agent == .claude ? "Riprende la conversazione qui con claude --resume" : "Riprende il thread qui con codex app-server")
             }
             if let fraction = session.contextFraction {
                 Text("ctx \(Fmt.percent(fraction))").foregroundStyle(.secondary).monospacedDigit()
