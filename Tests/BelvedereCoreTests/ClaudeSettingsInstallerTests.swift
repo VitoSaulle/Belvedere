@@ -35,19 +35,25 @@ import Testing
 
     @Test func writesExpectedHooks() {
         let s = install(original)
-        let stop = groups(s, "Stop").first?["hooks"] as? [[String: Any]]
-        #expect(stop?.first?["type"] as? String == "http")
-        #expect(stop?.first?["url"] as? String == "http://127.0.0.1:47615/hooks/Stop")
+        let hookPath = "'/Users/v/Library/Application Support/Belvedere/bin/belvedere-hook'"
+        // Solo hook di tipo command: con Belvedere chiuso escono in silenzio, un hook HTTP mostrerebbe un errore.
+        for event in ClaudeSettingsInstaller.events {
+            let hook = (groups(s, event).last?["hooks"] as? [[String: Any]])?.first
+            #expect(hook?["type"] as? String == "command", "\(event)")
+            #expect(hook?["command"] as? String == "\(hookPath) \(event)", "\(event)")
+        }
         let perm = groups(s, "PermissionRequest").first?["hooks"] as? [[String: Any]]
         #expect(perm?.first?["timeout"] as? Int == 600)
-        let start = groups(s, "SessionStart").first?["hooks"] as? [[String: Any]]
-        #expect(start?.first?["type"] as? String == "command")
-        #expect(start?.first?["command"] as? String == "'/Users/v/Library/Application Support/Belvedere/bin/belvedere-hook' SessionStart")
-        for event in ClaudeSettingsInstaller.httpEvents + ClaudeSettingsInstaller.commandEvents {
-            #expect(!groups(s, event).isEmpty, "\(event)")
-        }
         let line = s["statusLine"] as? [String: Any]
         #expect(line?["command"] as? String == "'/Users/v/Library/Application Support/Belvedere/bin/belvedere-statusline'")
+    }
+
+    @Test func uninstallAlsoRemovesLegacyHTTPHooks() {
+        var s = original
+        var hooks = s["hooks"] as! [String: Any]
+        hooks["Stop"] = [["hooks": [["type": "http", "url": "http://127.0.0.1:47615/hooks/Stop"]]]]
+        s["hooks"] = hooks
+        #expect(NSDictionary(dictionary: ClaudeSettingsInstaller.uninstall(from: s, port: port)).isEqual(to: original))
     }
 
     @Test func idempotent() {

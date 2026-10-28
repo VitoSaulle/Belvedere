@@ -3,11 +3,11 @@ import Foundation
 /// Aggiunge e toglie i hook e la status line di Belvedere nelle impostazioni di Claude Code,
 /// senza toccare il resto. Le funzioni sono pure: la scrittura su disco passa da `SettingsFile`.
 public enum ClaudeSettingsInstaller {
-    public static let httpEvents = ["UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse",
-                                    "PostToolUseFailure", "Notification", "Stop", "StopFailure",
-                                    "SubagentStart", "SubagentStop", "PreCompact", "PostCompact"]
-    /// Eventi che non accettano hook HTTP.
-    public static let commandEvents = ["SessionStart", "SessionEnd"]
+    /// Eventi inoltrati a Belvedere. Tutti con hook di tipo command (`belvedere-hook`): se Belvedere è chiuso
+    /// il comando esce in silenzio, mentre un hook HTTP farebbe comparire un errore nel terminale.
+    public static let events = ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PermissionRequest",
+                                "PostToolUse", "PostToolUseFailure", "Notification", "Stop", "StopFailure",
+                                "SubagentStart", "SubagentStop", "PreCompact", "PostCompact"]
 
     static let hookBinary = "belvedere-hook"
     static let statusBinary = "belvedere-statusline"
@@ -19,16 +19,12 @@ public enum ClaudeSettingsInstaller {
                                permissionTimeout: Double?) -> [String: Any] {
         var result = uninstall(from: settings, port: port)
         var hooks = result["hooks"] as? [String: Any] ?? [:]
-        for event in httpEvents {
-            var hook: [String: Any] = ["type": "http", "url": hookURL(event, port: port)]
+        for event in events {
+            var hook: [String: Any] = ["type": "command",
+                                       "command": shellQuote(helpers.appendingPathComponent(hookBinary).path) + " " + event]
             if event == "PermissionRequest", let permissionTimeout {
                 hook["timeout"] = Int((permissionTimeout + permissionTimeoutMargin).rounded(.up))
             }
-            hooks[event] = (hooks[event] as? [[String: Any]] ?? []) + [["hooks": [hook]]]
-        }
-        for event in commandEvents {
-            let hook: [String: Any] = ["type": "command",
-                                       "command": shellQuote(helpers.appendingPathComponent(hookBinary).path) + " " + event]
             hooks[event] = (hooks[event] as? [[String: Any]] ?? []) + [["hooks": [hook]]]
         }
         result["hooks"] = hooks
@@ -76,7 +72,7 @@ public enum ClaudeSettingsInstaller {
 
     public static func isInstalled(_ settings: [String: Any], port: UInt16) -> Bool {
         let hooks = settings["hooks"] as? [String: Any] ?? [:]
-        return (httpEvents + commandEvents).allSatisfy { event in
+        return events.allSatisfy { event in
             (hooks[event] as? [[String: Any]] ?? []).contains { group in
                 (group["hooks"] as? [[String: Any]] ?? []).contains { isOurs($0, port: port) }
             }
@@ -102,8 +98,7 @@ public enum ClaudeSettingsInstaller {
 
     // MARK: - Utilità
 
-    static func hookURL(_ event: String, port: UInt16) -> String { "http://127.0.0.1:\(port)/hooks/\(event)" }
-
+    /// Riconosce anche i vecchi hook HTTP verso Belvedere, così lo scollegamento li toglie.
     static func isOurs(_ hook: [String: Any], port: UInt16) -> Bool {
         if let url = hook["url"] as? String { return url.hasPrefix("http://127.0.0.1:\(port)/hooks/") }
         if let command = hook["command"] as? String { return command.contains(hookBinary) }
