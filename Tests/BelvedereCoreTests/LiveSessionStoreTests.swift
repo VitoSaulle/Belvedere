@@ -64,6 +64,53 @@ import Testing
         #expect(store.waitingCount == 0)
     }
 
+    /// I hook globali girano anche nelle sessioni lanciate da Belvedere: la richiesta arriva già dalla chat.
+    @Test func hostedSessionIgnoresHookPermission() {
+        var store = LiveSessionStore()
+        store.setHosted(["s1"])
+        let removed = store.apply(hook("PermissionRequest", bash), origin: nil)
+        #expect(removed.isEmpty)
+        #expect(store.sessions.first?.pending == nil)
+        store.apply(hook("PermissionRequest", session: "s2", bash), origin: nil)
+        #expect(store.sessions.first { $0.id == "s2" }?.pending != nil)
+    }
+
+    @Test func hostedOverlayWins() throws {
+        var store = LiveSessionStore()
+        var log = logSnapshot(status: .done)
+        log.title = "Titolo dal log"
+        store.apply(IndexUpdate(changed: [log], newBuckets: []))
+        var hosted = SessionSnapshot(id: "s1", agent: .claude, cwd: "/p")
+        hosted.status = .waiting
+        hosted.pending = PendingRequest(id: "r1", kind: .permission, toolName: "Bash", summary: "ls", receivedAt: Date())
+        hosted.origin = SessionOrigin(appName: "Belvedere", bundleID: nil, pid: nil)
+        hosted.contextTokens = 1234
+        hosted.lastActivity = Date()
+        store.setHosted(["s1"])
+        store.apply(hosted: hosted)
+        store.tick(now: Date())
+        let s = try #require(store.sessions.first)
+        #expect(s.status == .waiting)
+        #expect(s.pending?.id == "r1")
+        #expect(s.origin?.appName == "Belvedere")
+        #expect(s.contextTokens == 1234)
+        #expect(s.title == "Titolo dal log")
+        store.setHosted([])
+        #expect(store.sessions.first?.status == .done)
+        #expect(store.sessions.first?.pending == nil)
+    }
+
+    @Test func hostedSessionWithoutLogAppears() {
+        var store = LiveSessionStore()
+        var hosted = SessionSnapshot(id: "nuova", agent: .claude, cwd: "/p")
+        hosted.status = .working
+        hosted.lastActivity = Date()
+        store.setHosted(["nuova"])
+        store.apply(hosted: hosted)
+        store.tick(now: Date())
+        #expect(store.sessions.map(\.id) == ["nuova"])
+    }
+
     /// Negata nel terminale con Esc: nessun PostToolUse né Stop, il primo evento è il prompt successivo.
     @Test func newPromptClearsRequestDeniedInTerminal() throws {
         var store = LiveSessionStore()

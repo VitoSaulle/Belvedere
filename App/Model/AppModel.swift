@@ -40,6 +40,18 @@ final class AppModel {
     /// Il primo giro dell'indice non genera eventi: sarebbero centinaia di «nuova sessione».
     @ObservationIgnored private var feedReady = false
 
+    /// Sessioni lanciate da Belvedere in questa esecuzione, comprese quelle ferme.
+    private(set) var hostedSessions: [HostedSession] = []
+    /// Id delle sessioni nate in Belvedere, anche in esecuzioni precedenti: etichetta «Belvedere» e «Riprendi».
+    private(set) var launchedIDs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "launchedSessions") ?? [])
+    private(set) var presets: [LaunchPreset] = {
+        guard let data = UserDefaults.standard.data(forKey: "launchPresets") else { return [] }
+        return (try? JSONDecoder().decode([LaunchPreset].self, from: data)) ?? []
+    }()
+    /// Foglio «Nuova sessione», con la cartella proposta.
+    var showNewSession = false
+    var newSessionFolder: String?
+
     static let policyKey = "permissionPolicy"
     static let welcomeKey = "welcomeShown"
     static let limitsKey = "lastClaudeLimits"
@@ -135,6 +147,7 @@ final class AppModel {
 
     /// Ferma server e sorveglianza e salva l'indice: chiamato prima di uscire.
     func shutdown() async {
+        await stopAllHosted()
         loops.forEach { $0.cancel() }
         watcher?.stop()
         server?.stop()
@@ -193,6 +206,11 @@ final class AppModel {
     /// Risponde alla richiesta mostrata, identificata dal suo id: se nel frattempo ne è arrivata
     /// un'altra, la risposta non le passa.
     func respond(to request: PendingRequest, with decision: PermissionDecision) {
+        for host in hostedSessions {
+            guard let ask = host.state.asks.first(where: { $0.id == request.id }) else { continue }
+            host.answer(ask, allow: decision == .allow)
+            return
+        }
         guard request.kind == .permission else { return }
         let broker = self.broker
         Task { await broker.resolve(requestID: request.id, with: decision) }
@@ -215,6 +233,125 @@ final class AppModel {
                              now: Date(), calendar: .current)
     }
 
+    // MARK: - Sessioni lanciate da Belvedere
+
+    /// Prefisso dell'id provvisorio usato nella navigazione finché Claude non comunica il `session_id`.
+    static let provisionalPrefix = "belvedere:"
+
+    func host(for routeID: String) -> HostedSession? {
+        if routeID.hasPrefix(Self.provisionalPrefix) {
+            let uuid = String(routeID.dropFirst(Self.provisionalPrefix.count))
+            return hostedSessions.first { $0.id.uuidString == uuid }
+        }
+        return hostedSessions.last { $0.state.sessionID == routeID }
+    }
+
+    func isHosted(_ sessionID: String) -> Bool {
+        hostedSessions.contains { $0.isRunning && $0.state.sessionID == sessionID }
+    }
+
+    var workingHostedCount: Int {
+        hostedSessions.filter { $0.isRunning && ($0.state.status == .working || $0.state.status == .waiting) }.count
+    }
+
+    @discardableResult
+    func launch(_ options: LaunchOptions, history: [TranscriptItem] = []) -> HostedSession {
+        let host = HostedSession(options: options, history: history)
+        host.onChange = { [weak self, weak host] in
+            guard let self, let host else { return }
+            self.hostChanged(host)
+        }
+        hostedSessions.append(host)
+        host.start()
+        route = .session(host.state.sessionID ?? Self.provisionalPrefix + host.id.uuidString)
+        return host
+    }
+
+    /// Riprende in Belvedere una sessione vista nei log, con la sua conversazione.
+    func resume(_ sessionID: String) {
+        guard let s = session(sessionID) else { return }
+        if let existing = host(for: sessionID) {
+            existing.restart()
+            route = .session(sessionID)
+            return
+        }
+        let history = (try? TranscriptMessages.load(path: s.transcriptPath, agent: .claude)) ?? []
+        launch(LaunchOptions(folder: s.cwd, resumeID: sessionID), history: history)
+    }
+
+    /// «Riprendi in Belvedere» solo se la sessione non è viva altrove: mai due processi sulla stessa sessione.
+    func canResumeHere(_ s: SessionSnapshot) -> Bool {
+        guard s.agent == .claude, !s.cwd.isEmpty, !isHosted(s.id),
+              s.status != .working, s.status != .waiting else { return false }
+        if let pid = s.origin?.pid, s.origin?.appName != "Belvedere", kill(pid, 0) == 0 { return false }
+        return true
+    }
+
+    /// Ferma il processo di Belvedere e apre la sessione nel terminale con `claude --resume`.
+    func openInTerminal(_ sessionID: String) async {
+        let host = host(for: sessionID)
+        await host?.stop()
+        guard let s = session(sessionID) ?? host?.state.snapshot(launchedAt: host?.launchedAt),
+              let binary = host?.binary ?? HostedSession(options: LaunchOptions(folder: "/")).binary else { return }
+        let folder = Belvedere.supportDirectory.appendingPathComponent("handoff")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("\(s.id).command")
+        let script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary)
+        do {
+            try script.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            NSWorkspace.shared.open(url)
+        } catch {
+            serverError = "Non riesco ad aprire il terminale: \(error.localizedDescription)"
+        }
+        syncHosted()
+    }
+
+    func stopAllHosted() async {
+        for host in hostedSessions where host.isRunning { await host.stop() }
+        syncHosted()
+    }
+
+    func savePreset(name: String, options: LaunchOptions) {
+        presets.append(LaunchPreset(name: name, options: options))
+        storePresets()
+    }
+
+    func deletePreset(_ id: UUID) {
+        presets.removeAll { $0.id == id }
+        storePresets()
+    }
+
+    private func storePresets() {
+        if let data = try? JSONEncoder().encode(presets) { UserDefaults.standard.set(data, forKey: "launchPresets") }
+    }
+
+    private func hostChanged(_ host: HostedSession) {
+        if let id = host.state.sessionID {
+            if !launchedIDs.contains(id) {
+                launchedIDs.insert(id)
+                UserDefaults.standard.set(Array(launchedIDs), forKey: "launchedSessions")
+            }
+            // La navigazione passa dall'id provvisorio a quello vero appena Claude lo comunica.
+            if route == .session(Self.provisionalPrefix + host.id.uuidString) { route = .session(id) }
+        }
+        if let limits = host.state.limits, limits != store.claudeLimits {
+            store.apply(claudeLimits: limits)
+            if let data = try? JSONEncoder().encode(limits) { UserDefaults.standard.set(data, forKey: Self.limitsKey) }
+        }
+        syncHosted()
+    }
+
+    private func syncHosted() {
+        let live = hostedSessions.filter(\.isRunning)
+        store.setHosted(Set(live.compactMap(\.state.sessionID)))
+        for host in live {
+            if let snapshot = host.state.snapshot(launchedAt: host.launchedAt) { store.apply(hosted: snapshot) }
+        }
+        store.tick(now: Date())
+        publish()
+    }
+
     // MARK: - Canali
 
     private func startServer() {
@@ -227,6 +364,8 @@ final class AppModel {
                 let origin = event.callerPID.flatMap { OriginResolver.resolve(pid: $0) }
                 await self?.ingest(event, origin: origin)
                 guard name == "PermissionRequest" else { return (200, Data()) }
+                // Le sessioni di Belvedere chiedono il permesso nella chat: il hook globale non deve duplicarlo.
+                if await self?.isHosted(event.sessionID) == true { return (200, Data()) }
                 let holding = await broker.isHolding
                 let decision = await broker.decision(for: event.requestID)
                 // Finita l'attesa (risposta, scadenza o hook chiuso dal terminale) la richiesta

@@ -27,6 +27,9 @@ public struct LiveSessionStore: Sendable {
     private var hooks: [String: HookState] = [:]
     private var statusLines: [String: StatusLineState] = [:]
     private var codexLimits: PlanLimits?
+    /// Sessioni lanciate da Belvedere e ancora vive: la loro chat è la fonte di stato e richieste.
+    private var hostedIDs: Set<String> = []
+    private var hosted: [String: SessionSnapshot] = [:]
     /// Ultimi limiti letti dalla status line: l'app li salva e li ripristina all'avvio.
     public private(set) var claudeLimits: PlanLimits?
     private var now: Date = .distantPast
@@ -51,6 +54,7 @@ public struct LiveSessionStore: Sendable {
         if let path = event.transcriptPath { state.transcriptPath = path }
         if let origin { state.origin = origin }
         let before = state.pending
+        let hostedEvent = hostedIDs.contains(event.sessionID)
         for effect in event.effects {
             switch effect {
             case .register:
@@ -59,6 +63,8 @@ public struct LiveSessionStore: Sendable {
             case .status(let status):
                 state.status = status
                 state.statusAt = event.receivedAt
+            case .pending where hostedEvent:
+                break
             case .pending(let request):
                 state.pending.removeAll { $0.id == request.id }
                 state.pending.append(request)
@@ -90,6 +96,18 @@ public struct LiveSessionStore: Sendable {
         if let limits = status.limits { claudeLimits = limits }
     }
 
+    public mutating func setHosted(_ ids: Set<String>) {
+        hostedIDs = ids
+        hosted = hosted.filter { ids.contains($0.key) }
+    }
+
+    /// Stato della chat di una sessione lanciata da Belvedere: prevale su log e hook.
+    public mutating func apply(hosted snapshot: SessionSnapshot) {
+        guard hostedIDs.contains(snapshot.id) else { return }
+        hosted[snapshot.id] = snapshot
+        if let date = snapshot.lastActivity { advance(to: date) }
+    }
+
     public mutating func apply(claudeLimits limits: PlanLimits?) {
         claudeLimits = limits
     }
@@ -116,7 +134,7 @@ public struct LiveSessionStore: Sendable {
     // MARK: - Uscite
 
     public var sessions: [SessionSnapshot] {
-        let ids = Set(logs.keys).union(hooks.keys)
+        let ids = Set(logs.keys).union(hooks.keys).union(hosted.keys)
         return ids.compactMap(merged).sorted { a, b in
             let ra = Self.rank(a.status), rb = Self.rank(b.status)
             if ra != rb { return ra < rb }
@@ -146,6 +164,8 @@ public struct LiveSessionStore: Sendable {
             s = SessionSnapshot(id: id, agent: .claude, cwd: hook.cwd ?? "", transcriptPath: hook.transcriptPath ?? "")
             s.lastActivity = hook.statusAt
             s.startedAt = hook.statusAt
+        } else if let live = hosted[id] {
+            return live
         } else {
             return nil
         }
@@ -179,6 +199,19 @@ public struct LiveSessionStore: Sendable {
         let quiet = now.timeIntervalSince(s.lastActivity ?? .distantPast)
         if s.status == .working, quiet > Self.workingTimeout { s.status = .idle }
         if s.status == .done, quiet > Self.doneTimeout { s.status = .idle }
+        if let live = hosted[id] {
+            // La chat sa sempre cosa sta succedendo: niente scadenze dedotte dal silenzio.
+            s.status = live.status
+            s.pending = live.pending
+            s.origin = live.origin
+            if let model = live.model { s.model = model }
+            if let tokens = live.contextTokens { s.contextTokens = tokens }
+            if let window = live.contextWindow { s.contextWindow = window }
+            if let cost = live.costUSD { s.costUSD = cost }
+            if let text = live.lastText { s.lastText = text }
+            if s.cwd.isEmpty { s.cwd = live.cwd }
+            if (s.lastActivity ?? .distantPast) < (live.lastActivity ?? .distantPast) { s.lastActivity = live.lastActivity }
+        }
         return s
     }
 

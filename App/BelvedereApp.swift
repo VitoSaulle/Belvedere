@@ -78,6 +78,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let working = model.workingHostedCount
+        if working > 0 {
+            let alert = NSAlert()
+            alert.messageText = working == 1 ? "Una sessione sta lavorando" : "\(working) sessioni stanno lavorando"
+            alert.informativeText = "Uscendo si fermano. Potrai riprenderle da Belvedere o dal terminale."
+            alert.addButton(withTitle: "Esci")
+            alert.addButton(withTitle: "Annulla")
+            guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+        }
         Task {
             await model.shutdown()
             NSApp.reply(toApplicationShouldTerminate: true)
