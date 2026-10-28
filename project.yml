@@ -41,7 +41,7 @@ targets:
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 1
         # Aggiornamenti con Sparkle: chiave pubblica EdDSA (generate_keys). Vuota = aggiornamenti spenti.
-        SPARKLE_PUBLIC_KEY: ""
+        SPARKLE_PUBLIC_KEY: bxI90c8NQW3CtJ4d5KDiZd8ZEADZewkjMntsvpBtGj8=
       configs:
         # Distribuzione fuori dallo Store: firma del team, hardened runtime per la notarizzazione.
         Release:

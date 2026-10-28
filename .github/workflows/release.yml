@@ -45,9 +45,10 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           VERSION: ${{ github.ref_name }}
-          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           export VERSION="${VERSION#v}"
+          # Sparkle confronta CFBundleVersion: le build locali hanno 1, le release partono da 101.
+          export BUILD_NUMBER=$((GITHUB_RUN_NUMBER + 100))
           scripts/release.sh
       - name: Log in caso di errore
         if: failure()
