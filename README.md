@@ -11,7 +11,7 @@ App macOS nativa che riunisce in un solo posto le sessioni di **Claude Code** e 
 ## Cosa fa
 
 - **Plancia**: tutte le sessioni a colpo d'occhio, con stato (al lavoro, ti aspetta, conclusa), contesto usato, token e ultima attività. Anche quelle aperte da terminale o IntelliJ.
-- **Chat**: lancia sessioni Claude Code (`claude -p` in stream-json) e Codex (`codex app-server`) in qualunque cartella, con modello cloud o locale (LM Studio). Strumenti compatti, diff, richieste di permesso come card, slash command, messaggi in coda, «Ferma».
+- **Chat**: lancia sessioni Claude Code (`claude -p` in stream-json) e Codex (`codex app-server`) in qualunque cartella, con modello cloud o locale (LM Studio). Strumenti compatti, diff, richieste di permesso come card, slash command, Remote Control (`/rc`), messaggi in coda, «Ferma».
 - **Permessi e domande** a cui rispondere dalla Plancia, dalla menu bar o dal notch, senza aprire la sessione.
 - **Statistiche**: token al giorno, progetti, strumenti più usati, quota cloud/locale e una stima del costo a prezzi API.
 - **Limiti del piano** di Claude e di Codex (finestra di 5 ore e settimanale).

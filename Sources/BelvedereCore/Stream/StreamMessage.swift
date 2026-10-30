@@ -67,6 +67,12 @@ public struct AlwaysOption: Equatable, Sendable {
     public let help: String
 }
 
+/// Remote Control attivo su questa sessione.
+public struct RemoteControl: Equatable, Sendable {
+    public let url: String
+    public var isReconnecting = false
+}
+
 public struct TurnResult: Equatable, Sendable {
     public let isError: Bool
     public let subtype: String
@@ -75,6 +81,7 @@ public struct TurnResult: Equatable, Sendable {
     public let contextWindow: Int?
     /// Testo del risultato: per un turno in errore è il messaggio della CLI (es. login scaduto).
     public var message: String? = nil
+    public var turns: Int? = nil
 }
 
 /// Una riga dell'output stream-json di `claude -p`.
@@ -86,6 +93,11 @@ public enum StreamMessage: Equatable, Sendable {
     case textDelta(String)
     case permission(PermissionAsk)
     case controlResponse(requestID: String, payload: JSONValue)
+    case controlFailed(requestID: String, message: String)
+    /// La richiesta è stata risolta altrove (dal telefono, con Remote Control).
+    case controlCancelled(requestID: String)
+    /// `system/bridge_state`: come va la connessione di Remote Control.
+    case bridgeState(state: String, detail: String?)
     case rateLimits(PlanLimits)
     case interrupted
     case result(TurnResult)
@@ -98,7 +110,13 @@ public enum StreamMessage: Equatable, Sendable {
         let json = JSONValue.object(o)
         switch o["type"]?.stringValue {
         case "system":
-            return o["subtype"]?.stringValue == "init" ? initialized(json) : .other
+            switch o["subtype"]?.stringValue {
+            case "init": return initialized(json)
+            case "bridge_state":
+                guard let state = o["state"]?.stringValue else { return .other }
+                return .bridgeState(state: state, detail: o["detail"]?.stringValue)
+            default: return .other
+            }
         case "assistant":
             return .line(json: json)
         case "user":
@@ -124,6 +142,9 @@ public enum StreamMessage: Equatable, Sendable {
                                              suggestions: suggestions))
         case "control_response":
             guard let response = json["response"], let id = response["request_id"]?.stringValue else { return .other }
+            if response["subtype"]?.stringValue == "error" {
+                return .controlFailed(requestID: id, message: response["error"]?.stringValue ?? "")
+            }
             let payload = response["response"] ?? .null
             if case .array(let list)? = payload["commands"] {
                 return .commands(list.compactMap { c in
@@ -134,6 +155,8 @@ public enum StreamMessage: Equatable, Sendable {
                 })
             }
             return .controlResponse(requestID: id, payload: payload)
+        case "control_cancel_request":
+            return o["request_id"]?.stringValue.map { .controlCancelled(requestID: $0) } ?? .other
         case "rate_limit_event":
             return rateLimits(json["rate_limit_info"]?["unifiedWindows"])
         case "result":
@@ -190,6 +213,7 @@ public enum StreamMessage: Equatable, Sendable {
         return .result(TurnResult(isError: isError, subtype: json["subtype"]?.stringValue ?? "",
                                   costUSD: json["total_cost_usd"]?.numberValue,
                                   contextTokens: contextTokens, contextWindow: window,
-                                  message: json["result"]?.stringValue))
+                                  message: json["result"]?.stringValue,
+                                  turns: json["num_turns"]?.numberValue.map { Int($0) }))
     }
 }

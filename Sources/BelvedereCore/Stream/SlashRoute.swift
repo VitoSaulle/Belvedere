@@ -8,10 +8,21 @@ public enum SlashRoute: Equatable, Sendable {
     case setModel(String)
     /// `/plugin`: il pannello nativo, sopra `claude plugin …`.
     case plugins
+    /// `/rc`: Remote Control, sopra la richiesta di controllo `remote_control`.
+    case remoteControl(name: String?)
+    /// `/plan`: la modalità piano, più il messaggio se c'è.
+    case plan(prompt: String?)
     /// Comandi che funzionano solo nel terminale.
     case terminalOnly(String)
 
     static let alwaysTerminal: Set<String> = ["login", "logout", "resume", "exit", "quit"]
+
+    /// Comandi che la CLI non elenca in stream-json e che Belvedere esegue da sé: per il completamento.
+    public static let nativeCommands = [
+        SlashCommand(name: "remote-control", description: "Controlla la sessione dal telefono o da claude.ai/code", argumentHint: "[nome]"),
+        SlashCommand(name: "rc", description: "Controlla la sessione dal telefono o da claude.ai/code", argumentHint: "[nome]"),
+        SlashCommand(name: "plan", description: "Passa alla modalità piano", argumentHint: "[messaggio]"),
+    ]
 
     public static func route(_ text: String, terminalCommands: [String]) -> SlashRoute {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -23,6 +34,8 @@ public enum SlashRoute: Equatable, Sendable {
         case "clear": return .clear
         case "plugin", "plugins": return .plugins
         case "model" where !argument.isEmpty: return .setModel(argument)
+        case "rc", "remote-control": return .remoteControl(name: argument.isEmpty ? nil : argument)
+        case "plan": return .plan(prompt: argument.isEmpty ? nil : argument)
         default:
             if alwaysTerminal.contains(name) || terminalCommands.contains(name) { return .terminalOnly(name) }
             return .send(text)
