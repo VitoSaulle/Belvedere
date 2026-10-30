@@ -58,7 +58,8 @@ public struct PendingRequest: Codable, Equatable, Sendable {
     }
 }
 
-public struct FileChange: Codable, Equatable, Sendable {
+public struct FileChange: Codable, Equatable, Sendable, Identifiable {
+    public var id: String { path }
     public let path: String
     public var added: Int
     public var removed: Int
