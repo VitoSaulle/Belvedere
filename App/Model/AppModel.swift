@@ -731,7 +731,7 @@ final class AppModel {
 
     /// Solo tra un turno e l'altro: chiudere la CLI a metà interromperebbe il lavoro.
     func handOverReady(_ s: SessionSnapshot) -> Bool {
-        canHandOver(s) && liveClaude[s.id]?.isIdle == true && ![.working, .waiting].contains(s.status)
+        canHandOver(s) && liveClaude[s.id]?.isBetweenTurns == true && ![.working, .waiting].contains(s.status)
     }
 
     /// Chiude la CLI con SIGTERM, come farebbe il sistema, e riprende la conversazione qui.
@@ -741,7 +741,7 @@ final class AppModel {
         // Il registro letto dal tick ha fino a 5 s: si decide su quello di adesso.
         let dirs = profiles.profiles(.claude).map(\.configDir)
         guard let process = ClaudeRegistry.live(configDirs: dirs).first(where: { $0.sessionID == sessionID }),
-              process.canHandOver, process.isIdle, kill(process.pid, SIGTERM) == 0 else {
+              process.canHandOver, process.isBetweenTurns, kill(process.pid, SIGTERM) == 0 else {
             handOverFailure = sessionID
             return
         }
@@ -824,7 +824,7 @@ final class AppModel {
                                             pidFile: Self.handoffPID(s.id).path, environment: account)
         } else {
             let local = options.local == nil ? [:] : ClaudeCommand.environment(options, base: [:])
-            script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary,
+            script = TerminalHandoff.script(cwd: s.cwd, sessionID: s.id, binary: binary, permission: options.permission,
                                             pidFile: Self.handoffPID(s.id).path, environment: local.merging(account) { $1 })
         }
         try? FileManager.default.removeItem(at: Self.handoffPID(s.id))

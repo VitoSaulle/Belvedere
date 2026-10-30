@@ -30,9 +30,17 @@ import Testing
         #expect(try !#require(ClaudeRegistry.parse(entry(pid: 1, entrypoint: "claude-vscode"))).canHandOver)
     }
 
-    @Test func busyIsNotIdle() throws {
-        #expect(try #require(ClaudeRegistry.parse(entry(pid: 1))).isIdle)
-        #expect(try !#require(ClaudeRegistry.parse(entry(pid: 1, status: "busy"))).isIdle)
+    @Test func aTurnInProgressIsNotBetweenTurns() throws {
+        #expect(try #require(ClaudeRegistry.parse(entry(pid: 1))).isBetweenTurns)
+        #expect(try !#require(ClaudeRegistry.parse(entry(pid: 1, status: "busy"))).isBetweenTurns)
+        #expect(try !#require(ClaudeRegistry.parse(entry(pid: 1, status: "sconosciuto"))).isBetweenTurns)
+    }
+
+    @Test func aBackgroundShellIsBetweenTurnsButFlagged() throws {
+        let process = try #require(ClaudeRegistry.parse(entry(pid: 1, status: "shell")))
+        #expect(process.isBetweenTurns)
+        #expect(process.hasBackgroundShell)
+        #expect(try !#require(ClaudeRegistry.parse(entry(pid: 1))).hasBackgroundShell)
     }
 
     @Test func aReusedPIDIsNotAClaudeProcess() {

@@ -70,14 +70,18 @@ public enum ClaudeCommand {
         s.allSatisfy { $0.isLetter || $0.isNumber || "-_./:=@".contains($0) } ? s : quote(s)
     }
 
+    static func permissionArguments(_ permission: PermissionChoice) -> [String] {
+        switch permission {
+        case .ask: []
+        case .acceptEdits, .auto, .plan: ["--permission-mode", permission.rawValue]
+        case .skip: ["--dangerously-skip-permissions"]
+        }
+    }
+
     private static func variableArguments(_ o: LaunchOptions, isGitRepository: Bool) -> [String] {
         var args: [String] = []
         if let model = o.local?.id ?? o.model { args += ["--model", model] }
-        switch o.permission {
-        case .ask: break
-        case .acceptEdits, .auto, .plan: args += ["--permission-mode", o.permission.rawValue]
-        case .skip: args.append("--dangerously-skip-permissions")
-        }
+        args += permissionArguments(o.permission)
         if let id = o.resumeID { args += ["--resume", id] }
         if let name = o.name, !name.isEmpty { args += ["--name", name] }
         if o.worktree && isGitRepository { args.append("--worktree") }
@@ -112,9 +116,10 @@ public enum TerminalHandoff {
     /// Script `.command` che apre la sessione nel terminale con `claude --resume`.
     /// Scrive il proprio PID, che `exec` passa a claude: finché vive, Belvedere non riprende la sessione.
     /// `environment` porta le variabili di un modello locale, così la sessione non passa al cloud.
-    public static func script(cwd: String, sessionID: String, binary: String, pidFile: String,
-                              environment: [String: String] = [:]) -> String {
-        script(cwd: cwd, arguments: [binary, "--resume", sessionID], pidFile: pidFile, environment: environment)
+    public static func script(cwd: String, sessionID: String, binary: String, permission: PermissionChoice = .ask,
+                              pidFile: String, environment: [String: String] = [:]) -> String {
+        script(cwd: cwd, arguments: [binary, "--resume", sessionID] + ClaudeCommand.permissionArguments(permission),
+               pidFile: pidFile, environment: environment)
     }
 
     /// Come sopra, con la riga di comando completa (`codex resume <id>` per Codex).

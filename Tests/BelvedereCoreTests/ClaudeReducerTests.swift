@@ -160,3 +160,13 @@ import Testing
         #expect(ModelInfo.displayName("qwen3-coder-30b") == "qwen3-coder-30b")
     }
 }
+
+@Suite struct ClaudeReducerPermissionModeTests {
+    @Test func theLastModeInTheLogWins() {
+        var reducer = ClaudeReducer(transcriptPath: "/t/s.jsonl")
+        reducer.consume(Data(#"{"type":"permission-mode","permissionMode":"bypassPermissions","sessionId":"s"}"#.utf8))
+        #expect(reducer.snapshot.permissionMode == "bypassPermissions")
+        reducer.consume(Data(#"{"type":"permission-mode","permissionMode":"plan","sessionId":"s"}"#.utf8))
+        #expect(reducer.snapshot.permissionMode == "plan")
+    }
+}

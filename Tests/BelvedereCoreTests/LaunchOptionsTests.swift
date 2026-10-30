@@ -17,6 +17,22 @@ import Testing
         #expect(back.agent == .codex)
     }
 
+    @Test func resumingKeepsThePermissionModeOfTheSession() {
+        var s = SessionSnapshot(id: "a", agent: .claude, cwd: "/p")
+        s.permissionMode = "bypassPermissions"
+        let o = LaunchOptions.resuming(s)
+        #expect(o.permission == .skip)
+        #expect(ClaudeCommand.arguments(o, isGitRepository: false).contains("--dangerously-skip-permissions"))
+        s.permissionMode = "acceptEdits"
+        #expect(LaunchOptions.resuming(s).permission == .acceptEdits)
+    }
+
+    @Test func anUnknownModeGrantsNothing() {
+        #expect(PermissionChoice(claudeMode: "default") == .ask)
+        #expect(PermissionChoice(claudeMode: "nuova") == .ask)
+        #expect(PermissionChoice(claudeMode: nil) == .ask)
+    }
+
     @Test func resumingSnapshotKeepsAgent() {
         let s = SessionSnapshot(id: "t1", agent: .codex, cwd: "/p")
         #expect(LaunchOptions.resuming(s).agent == .codex)

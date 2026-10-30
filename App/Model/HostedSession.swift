@@ -193,7 +193,7 @@ final class HostedSession: Identifiable {
                 state.addNote("Modalità piano")
                 if let prompt { return send(prompt) }
             }
-        case .terminalOnly, .plugins:
+        case .terminalOnly, .plugins, .resume:
             break
         }
         changed()
@@ -271,6 +271,18 @@ final class HostedSession: Identifiable {
             isRunning = false
         }
         isStopping = false
+    }
+
+    /// Riavvia la conversazione con altri permessi: la CLI accetta «Salta permessi» solo all'avvio.
+    /// Un turno in corso si interrompe e le richieste aperte decadono con il processo.
+    func change(permission: PermissionChoice) async {
+        guard state.sessionID != nil else { return }
+        await stop()
+        for ask in state.asks { state.answered(ask.id) }
+        options.permission = permission
+        resumeIfPossible()
+        state.addNote("Permessi: \(permission.label)")
+        changed()
     }
 
     /// Riavvia il processo dopo un errore, riprendendo la stessa conversazione.

@@ -19,7 +19,7 @@ public struct ClaudeReducer: TranscriptReducer {
         snapshot.contextWindow = ModelInfo.defaultContextWindow
     }
 
-    private static let wanted = ["assistant", "user", "ai-title", "cost-state", "fork-context-ref"]
+    private static let wanted = ["assistant", "user", "ai-title", "cost-state", "fork-context-ref", "permission-mode"]
     private static let markers = wanted.map { Data("\"\($0)\"".utf8) }
     private static let typePrefix = Data(#"{"type":""#.utf8)
     private static let wantedPrefixes = wanted.map { Data(#"{"type":"\#($0)""#.utf8) }
@@ -44,6 +44,8 @@ public struct ClaudeReducer: TranscriptReducer {
             if estimatedCost == nil, let cost = (obj["totalCostUSD"] as? NSNumber)?.doubleValue { snapshot.costUSD = cost }
         case "fork-context-ref":
             inheritedContext = true
+        case "permission-mode":
+            if let mode = obj["permissionMode"] as? String { snapshot.permissionMode = mode }
         default: break
         }
     }

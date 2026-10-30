@@ -105,6 +105,8 @@ public struct SessionSnapshot: Codable, Equatable, Sendable, Identifiable {
     public var origin: SessionOrigin?
     /// Profilo (account) a cui appartiene la sessione, dedotto dalla cartella della trascrizione.
     public var profileID: UUID?
+    /// Ultima modalità dei permessi scritta nel log: la ripresa riparte da qui. Solo Claude Code.
+    public var permissionMode: String?
 
     public init(id: String, agent: AgentKind, cwd: String = "", transcriptPath: String = "") {
         self.id = id

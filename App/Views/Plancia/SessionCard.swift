@@ -44,7 +44,7 @@ struct SessionCard: View {
             }
             if model.canHandOver(session) {
                 Button("Passa a Belvedere") {
-                    guard confirmHandOver(session) else { return }
+                    guard confirmHandOver(session, backgroundShell: model.liveClaude[session.id]?.hasBackgroundShell == true) else { return }
                     Task { await model.handOver(session.id) }
                 }
                 .disabled(!model.handOverReady(session))

@@ -141,7 +141,10 @@ struct ReadOnlyBar: View {
 
     private var statusText: String {
         if model.handOverFailure == session.id { return "Il terminale non si è chiuso" }
-        if model.canHandOver(session) { return "Aperta in \(session.origin?.appName ?? "un terminale")" }
+        if model.canHandOver(session) {
+            let place = "Aperta in \(session.origin?.appName ?? "un terminale")"
+            return model.handOverReady(session) ? place : "\(place) · si può passare a fine turno"
+        }
         return model.canResumeHere(session) ? "Sessione ferma" : "Solo osservazione"
     }
 }
@@ -154,7 +157,7 @@ struct HandOverButton: View {
     var body: some View {
         let ready = model.handOverReady(session)
         Button {
-            guard confirmHandOver(session) else { return }
+            guard confirmHandOver(session, backgroundShell: model.liveClaude[session.id]?.hasBackgroundShell == true) else { return }
             Task { await model.handOver(session.id) }
         } label: {
             Label("Passa a Belvedere", systemImage: "arrow.down.forward.and.arrow.up.backward")
@@ -167,11 +170,12 @@ struct HandOverButton: View {
     }
 }
 
-@MainActor func confirmHandOver(_ session: SessionSnapshot) -> Bool {
+@MainActor func confirmHandOver(_ session: SessionSnapshot, backgroundShell: Bool) -> Bool {
     let alert = NSAlert()
     alert.messageText = "Passare la sessione a Belvedere?"
     alert.informativeText = "Claude Code si chiude in \(session.origin?.appName ?? "terminale") e la conversazione continua qui. "
         + "Quello che hai scritto nel terminale senza inviarlo si perde."
+        + (backgroundShell ? "\n\nC'è un comando in esecuzione in background: verrà interrotto." : "")
     alert.addButton(withTitle: "Passa a Belvedere")
     alert.addButton(withTitle: "Annulla")
     return alert.runModal() == .alertFirstButtonReturn

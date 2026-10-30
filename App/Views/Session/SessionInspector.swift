@@ -1,5 +1,17 @@
+import AppKit
 import BelvedereCore
 import SwiftUI
+
+@MainActor private func confirmPermissionChange(_ choice: PermissionChoice, busy: Bool) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "Riavviare la sessione con «\(choice.label)»?"
+    alert.informativeText = (busy ? "Il turno in corso si interrompe e le richieste aperte decadono: per riprendere scrivi a Claude di continuare. "
+                                  : "La conversazione riprende da dove è. ")
+        + (choice == .skip ? "Claude userà tutti gli strumenti senza chiedere." : "")
+    alert.addButton(withTitle: "Riavvia")
+    alert.addButton(withTitle: "Annulla")
+    return alert.runModal() == .alertFirstButtonReturn
+}
 
 struct SessionInspector: View {
     @Environment(AppModel.self) private var model
@@ -52,7 +64,21 @@ struct SessionInspector: View {
                             }
                             if let mode = host.state.permissionMode {
                                 Divider().opacity(0.4)
-                                row("Permessi", Self.modeLabel(mode, skip: host.options.permission == .skip))
+                                HStack {
+                                    Text("Permessi").foregroundStyle(.secondary)
+                                    Spacer()
+                                    Menu(Self.modeLabel(mode, skip: host.options.permission == .skip)) {
+                                        ForEach(PermissionChoice.allCases, id: \.self) { choice in
+                                            Button(choice.label) {
+                                                guard confirmPermissionChange(choice, busy: [.working, .waiting].contains(s.status)) else { return }
+                                                Task { await host.change(permission: choice) }
+                                            }
+                                        }
+                                    }
+                                    .menuStyle(.borderlessButton)
+                                    .fixedSize()
+                                }
+                                .font(.system(size: 12.5))
                             }
                         }
                     }
