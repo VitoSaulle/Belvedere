@@ -15,9 +15,14 @@ import Testing
     }
 
     @Test func accountCommandsAreTerminalOnly() {
-        for name in ["login", "logout", "resume", "exit", "quit"] {
+        for name in ["login", "logout", "exit", "quit"] {
             #expect(SlashRoute.route("/\(name) x", terminalCommands: []) == .terminalOnly(name))
         }
+    }
+
+    @Test func resumeOpensThePicker() {
+        #expect(SlashRoute.route("/resume", terminalCommands: []) == .resume(query: nil))
+        #expect(SlashRoute.route("/resume bug login", terminalCommands: ["resume"]) == .resume(query: "bug login"))
     }
 
     @Test func plainTextAndCustomCommandsAreSent() {

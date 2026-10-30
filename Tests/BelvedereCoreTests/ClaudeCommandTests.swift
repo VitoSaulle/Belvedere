@@ -146,6 +146,11 @@ import Testing
         #expect(!TerminalHandoff.isRunning(pidFile: file))
     }
 
+    @Test func terminalHandoffKeepsSkippedPermissions() {
+        let script = TerminalHandoff.script(cwd: "/p", sessionID: "abc", binary: "/b/claude", permission: .skip, pidFile: "/t/a.pid")
+        #expect(script.contains("'--resume' 'abc' '--dangerously-skip-permissions'"))
+    }
+
     @Test func resumingLeavesTheWorktreeWhereItIs() {
         let o = LaunchOptions(folder: "/repo", permission: .acceptEdits, worktree: true)
         let r = o.resuming("abc", cwd: "/repo/.claude/worktrees/x")

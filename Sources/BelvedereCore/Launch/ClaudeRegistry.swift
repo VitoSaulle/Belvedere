@@ -18,8 +18,10 @@ public struct LiveClaudeProcess: Equatable, Sendable {
 
     /// Solo la CLI aperta in un terminale: estensioni e SDK appartengono all'app che li ha lanciati.
     public var canHandOver: Bool { entrypoint == "cli" }
-    /// Tra un turno e l'altro: chiuderlo non interrompe nessun lavoro.
-    public var isIdle: Bool { status == "idle" }
+    /// Tra un turno e l'altro: nessuna risposta in corso.
+    public var isBetweenTurns: Bool { status == "idle" || hasBackgroundShell }
+    /// Turno finito ma con un comando ancora vivo: chiudendo la CLI si interrompe anche quello.
+    public var hasBackgroundShell: Bool { status == "shell" }
 }
 
 /// Legge il registro dei processi di Claude Code. Non è un'API documentata: un file illeggibile

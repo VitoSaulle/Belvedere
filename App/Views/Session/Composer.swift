@@ -12,6 +12,7 @@ struct Composer: View {
     let sessionID: String
     @State private var text = ""
     @State private var terminalOnly: String?
+    @State private var resumeSearch: ResumeSearch?
     @State private var files: [String] = []
     @State private var showErrorDetail = false
     @State private var images: [ImageAttachment] = []
@@ -37,6 +38,9 @@ struct Composer: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 14)
         .frame(maxWidth: 760)
+        .sheet(item: $resumeSearch) { search in
+            ResumePicker(agent: host.agent, folder: host.state.cwd ?? host.options.folder, currentID: sessionID, query: search.text)
+        }
         .task(id: fileQuery) { await loadFiles() }
         .onAppear {
             focused = true
@@ -161,6 +165,8 @@ struct Composer: View {
         case .plugins:
             terminalOnly = "plugin"
             return
+        case .resume(let query):
+            resumeSearch = ResumeSearch(text: query ?? "")
         default:
             break
         }

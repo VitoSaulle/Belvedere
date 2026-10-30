@@ -12,6 +12,17 @@ public enum PermissionChoice: String, Codable, CaseIterable, Sendable {
         case .skip: "Salta permessi"
         }
     }
+
+    /// La scelta che corrisponde a una modalità di Claude Code; una sconosciuta non concede nulla.
+    public init(claudeMode: String?) {
+        switch claudeMode {
+        case "bypassPermissions": self = .skip
+        case "acceptEdits": self = .acceptEdits
+        case "auto": self = .auto
+        case "plan": self = .plan
+        default: self = .ask
+        }
+    }
 }
 
 /// Modello di LM Studio scelto per una sessione locale.
@@ -102,8 +113,10 @@ extension LaunchOptions {
     }
 
     /// Opzioni per riprendere una sessione vista nei log; una sessione locale resta locale.
+    /// La CLI non ricorda la modalità dei permessi con `--resume`: resta quella che aveva la sessione.
     public static func resuming(_ s: SessionSnapshot) -> LaunchOptions {
         let local = s.isLocalModel ? s.model.map { LocalModelChoice(id: $0, contextLength: s.contextWindow) } : nil
-        return LaunchOptions(folder: s.cwd, agent: s.agent, local: local, resumeID: s.id, profileID: s.profileID)
+        return LaunchOptions(folder: s.cwd, agent: s.agent, permission: PermissionChoice(claudeMode: s.permissionMode),
+                             local: local, resumeID: s.id, profileID: s.profileID)
     }
 }
