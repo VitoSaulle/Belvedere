@@ -34,6 +34,12 @@ public enum StreamInput {
         control(requestID, ["subtype": "set_permission_mode", "mode": mode])
     }
 
+    public static func remoteControl(requestID: String, enabled: Bool, name: String? = nil) -> Data {
+        var request: [String: Any] = ["subtype": "remote_control", "enabled": enabled]
+        if let name { request["name"] = name }
+        return control(requestID, request)
+    }
+
     public static func decision(_ decision: HostDecision, for requestID: String) -> Data {
         var inner: [String: Any]
         switch decision {

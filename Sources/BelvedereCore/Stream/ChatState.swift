@@ -18,6 +18,12 @@ public struct ChatState: Sendable {
     public var mcpServers: [MCPServerInfo] = []
     public var commands: [SlashCommand] = []
     public var terminalCommands: [String] = []
+    /// Remote Control attivo; `nil` se è spento.
+    public var remoteControl: RemoteControl?
+    /// Richiesta `remote_control` senza ancora risposta.
+    var remoteControlRequest: (id: String, enabling: Bool)?
+    /// Comando rifiutato dalla CLI perché esiste solo nel terminale.
+    public var unavailableCommand: String?
     public var contextTokens: Int?
     public var contextWindow: Int?
     public var costUSD: Double?
@@ -84,8 +90,25 @@ public struct ChatState: Sendable {
             asks.append(ask)
             status = .waiting
             lastActivity = now
-        case .controlResponse:
-            break
+        case .controlResponse(let id, let payload):
+            guard let request = remoteControlRequest, request.id == id else { break }
+            remoteControlRequest = nil
+            remoteControl = request.enabling ? payload["session_url"]?.stringValue.map { RemoteControl(url: $0) } : nil
+        case .controlFailed(let id, let message):
+            guard remoteControlRequest?.id == id else { break }
+            remoteControlRequest = nil
+            lastError = "Remote Control non è disponibile: \(message)"
+        case .controlCancelled(let id):
+            answered(id)
+        case .bridgeState(let bridge, let detail):
+            guard remoteControl != nil else { break }
+            switch bridge {
+            case "failed", "policy_disabled":
+                remoteControl = nil
+                lastError = "Remote Control si è interrotto" + (detail.map { ": \($0)" } ?? ".")
+            default:
+                remoteControl?.isReconnecting = bridge == "reconnecting"
+            }
         case .rateLimits(let l):
             limits = l
         case .interrupted:
@@ -99,6 +122,9 @@ public struct ChatState: Sendable {
             if let cost = result.costUSD { costUSD = cost }
             if let tokens = result.contextTokens, tokens > 0 { contextTokens = tokens }
             if let window = result.contextWindow { contextWindow = window }
+            if result.turns == 0, !result.isError, let name = Self.unavailableCommand(result.message) {
+                unavailableCommand = name
+            }
             if queuedTurn {
                 queuedTurn = false
                 status = asks.isEmpty ? .working : .waiting
@@ -122,6 +148,7 @@ public struct ChatState: Sendable {
         items.append(.user(id: "local-\(UUID().uuidString)", text: text))
         status = asks.isEmpty ? .working : .waiting
         lastError = nil
+        unavailableCommand = nil
         lastActivity = now
     }
 
@@ -142,6 +169,8 @@ public struct ChatState: Sendable {
 
     public mutating func processExited(code: Int32, stderr: String, now: Date) {
         queuedTurn = false
+        remoteControl = nil
+        remoteControlRequest = nil
         streaming = nil
         asks = []
         status = .ended
@@ -155,6 +184,18 @@ public struct ChatState: Sendable {
         let summary = Self.errorSummary(text)
         lastError = summary
         if summary != text { errorDetail = stderr }
+    }
+
+    public mutating func remoteControlRequested(_ requestID: String, enabling: Bool) {
+        remoteControlRequest = (requestID, enabling)
+    }
+
+    /// La CLI in stream-json risponde così ai comandi che esistono solo nel terminale:
+    /// un turno senza modello e senza errore, e il comando non è elencato da nessuna parte.
+    private static func unavailableCommand(_ text: String?) -> String? {
+        guard let text, text.hasPrefix("/"), text.hasSuffix(" isn't available in this environment.") else { return nil }
+        let name = text.dropFirst().prefix { $0 != " " }
+        return name.isEmpty ? nil : String(name)
     }
 
     /// Le ultime 3 righe non vuote che non sono righe di uno stack (`at …`): il motivo sta in fondo.

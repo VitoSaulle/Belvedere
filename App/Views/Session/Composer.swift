@@ -23,8 +23,11 @@ struct Composer: View {
             if let error = host.state.lastError {
                 banner(error)
             }
-            if let name = terminalOnly {
+            if let name = terminalOnly ?? host.state.unavailableCommand {
                 terminalNotice(name)
+            }
+            if let remote = host.state.remoteControl {
+                remoteControlNotice(remote)
             }
             if !suggestions.isEmpty {
                 suggestionList
@@ -101,6 +104,12 @@ struct Composer: View {
             Menu {
                 Button("Apri nel terminale", systemImage: "terminal") { Task { await model.openInTerminal(sessionID) } }
                     .disabled(model.isTransferring(sessionID))
+                if host.agent == .claude {
+                    let active = host.state.remoteControl != nil
+                    Button(active ? "Disattiva Remote Control" : "Attiva Remote Control", systemImage: "iphone") {
+                        host.setRemoteControl(!active)
+                    }
+                }
                 if !host.isRunning {
                     Button("Riavvia la sessione", systemImage: "arrow.clockwise") { host.restart() }
                 }
@@ -240,7 +249,8 @@ struct Composer: View {
 
     private var suggestions: [Suggestion] {
         if let query = slashQuery {
-            return Completions.slash(query, in: host.state.commands).map { .command(name: $0.name, description: $0.description) }
+            let native = host.agent == .claude ? SlashRoute.nativeCommands : []
+            return Completions.slash(query, in: host.state.commands + native).map { .command(name: $0.name, description: $0.description) }
         }
         if fileQuery != nil { return files.prefix(8).map { .file($0) } }
         return []
@@ -328,7 +338,32 @@ struct Composer: View {
                 .help(model.isTransferring(sessionID) ? "Disponibile dopo la prima risposta nel nuovo profilo" : "")
                 .buttonStyle(.bordered)
                 .buttonBorderShape(.capsule)
-            Button { terminalOnly = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+            Button {
+                terminalOnly = nil
+                host.dismissUnavailableCommand()
+            } label: { Image(systemName: "xmark") }.buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 12))
+    }
+
+    private func remoteControlNotice(_ remote: RemoteControl) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "iphone").foregroundStyle(.secondary)
+            Text(remote.isReconnecting ? "Remote Control: riconnessione…" : "Remote Control attivo").font(.system(size: 12.5))
+            Spacer()
+            if let url = URL(string: remote.url) {
+                Link("Apri", destination: url).font(.system(size: 12.5))
+            }
+            Button("Copia link") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(remote.url, forType: .string)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            Button("Disattiva") { host.setRemoteControl(false) }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.capsule)
         }
         .padding(10)
         .background(Color.primary.opacity(0.05), in: .rect(cornerRadius: 12))

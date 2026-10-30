@@ -179,11 +179,43 @@ final class HostedSession: Identifiable {
             }
         case .clear:
             Task { await clear() }
+        case .remoteControl(let name):
+            setRemoteControl(true, name: name)
+        case .plan(let prompt):
+            if codex != nil {
+                state.addNote("La modalità piano si usa solo con Claude Code")
+            } else {
+                if !isRunning { resumeIfPossible() }
+                guard isRunning else { break }
+                write(StreamInput.setPermissionMode(requestID: UUID().uuidString, mode: "plan"))
+                state.permissionMode = "plan"
+                state.addNote("Modalità piano")
+                if let prompt { return send(prompt) }
+            }
         case .terminalOnly, .plugins:
             break
         }
         changed()
         return route
+    }
+
+    func dismissUnavailableCommand() {
+        state.unavailableCommand = nil
+        changed()
+    }
+
+    /// Accende o spegne Remote Control: la CLI risponde con il link, che finisce in `state.remoteControl`.
+    func setRemoteControl(_ enabled: Bool, name: String? = nil) {
+        guard codex == nil else {
+            state.addNote("Remote Control si usa solo con Claude Code")
+            return
+        }
+        if !isRunning { resumeIfPossible() }
+        guard isRunning else { return }
+        let id = UUID().uuidString
+        state.remoteControlRequested(id, enabling: enabled)
+        write(StreamInput.remoteControl(requestID: id, enabled: enabled, name: name))
+        changed()
     }
 
     func answer(_ ask: PermissionAsk, allow: Bool, always: Bool = false) {
