@@ -33,6 +33,9 @@ SIGNING_STYLE=${SIGNING_STYLE:-automatic}
 SIGNING_CERT=""
 [ "$SIGNING_STYLE" = manual ] && SIGNING_CERT="
   <key>signingCertificate</key><string>Developer ID Application</string>"
+# Anche l'archivio: con la firma automatica ogni runner nuovo crea un certificato di sviluppo, fino al limite di Apple.
+set --
+[ "$SIGNING_STYLE" = manual ] && set -- CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=Developer ID Application"
 
 step "progetto e helper universali"
 xcodegen generate --quiet
@@ -44,7 +47,7 @@ HELPERS=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
 step "archivio Release"
 xcodebuild -project Belvedere.xcodeproj -scheme Belvedere -configuration Release \
   -archivePath "$OUT/Belvedere.xcarchive" -clonedSourcePackagesDirPath "$SPM" -allowProvisioningUpdates $AUTH \
-  HELPERS_DIR="$HELPERS" $VERSIONING archive >> "$LOG" 2>&1 || fail "archivio"
+  HELPERS_DIR="$HELPERS" "$@" $VERSIONING archive >> "$LOG" 2>&1 || fail "archivio"
 
 cat > "$OUT/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
