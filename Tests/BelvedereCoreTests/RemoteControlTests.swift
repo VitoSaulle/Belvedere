@@ -107,6 +107,74 @@ import Testing
         #expect(state.status == .working)
     }
 
+    private func echo(_ id: String, _ text: String, extra: String = "") -> StreamMessage {
+        decode(#"{"type":"user","uuid":"\#(id)","isReplay":true\#(extra),"message":{"role":"user","content":"\#(text)"}}"#)
+    }
+
+    @Test func messageFromThePhoneAppearsInTheChat() {
+        var state = ChatState()
+        state.apply(echo("u1", "scritto dal telefono"), now: now)
+        #expect(state.items == [.user(id: "u1", text: "scritto dal telefono")])
+        #expect(state.status == .working)
+    }
+
+    @Test func echoOfALocalMessageIsNotDuplicated() {
+        var state = ChatState()
+        state.userSent("foto.png ciao", id: "u1", now: now)
+        state.apply(echo("u1", "ciao"), now: now)
+        #expect(state.items == [.user(id: "u1", text: "foto.png ciao")])
+    }
+
+    private let turnEnd = #"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"ok"}"#
+
+    /// La CLI può unire il messaggio in coda al turno in corso: arriva un solo `result`.
+    @Test func queuedMessageAbsorbedByTheTurnEndsIt() {
+        var state = ChatState()
+        state.userSent("primo", id: "u1", now: now)
+        state.userSent("secondo", id: "u2", now: now)
+        state.apply(echo("u1", "primo"), now: now)
+        #expect(state.queuedTurn)
+        state.apply(echo("u2", "secondo"), now: now)
+        state.apply(decode(turnEnd), now: now)
+        #expect(state.status == .done)
+    }
+
+    /// In coda per il turno dopo: l'eco arriva dopo il `result` e la sessione resta al lavoro.
+    @Test func queuedMessageForTheNextTurnKeepsWorking() {
+        var state = ChatState()
+        state.userSent("primo", id: "u1", now: now)
+        state.userSent("secondo", id: "u2", now: now)
+        state.apply(echo("u1", "primo"), now: now)
+        state.apply(decode(turnEnd), now: now)
+        #expect(state.status == .working)
+        state.apply(echo("u2", "secondo"), now: now)
+        #expect(state.status == .working)
+    }
+
+    @Test func phoneMessageDoesNotHideAPermissionCard() {
+        var state = ChatState()
+        state.apply(decode(#"{"type":"control_request","request_id":"p1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}"#), now: now)
+        state.apply(echo("u1", "intanto questo"), now: now)
+        #expect(state.status == .waiting)
+    }
+
+    @Test func compactSummaryIsNotAUserMessage() {
+        var state = ChatState()
+        state.apply(decode(#"{"type":"user","uuid":"u1","isReplay":false,"isSynthetic":true,"message":{"role":"user","content":"This session is being continued"}}"#), now: now)
+        #expect(state.items.isEmpty)
+    }
+
+    @Test func commandEchoStaysHidden() {
+        var state = ChatState()
+        state.apply(echo("u1", "<command-name>/compact</command-name>"), now: now)
+        #expect(state.items.isEmpty)
+    }
+
+    @Test func messageCarriesItsID() throws {
+        let object = try JSONSerialization.jsonObject(with: StreamInput.user("ciao", id: "u1")) as? [String: Any]
+        #expect(object?["uuid"] as? String == "u1")
+    }
+
     @Test func unavailableCommandOffersTheTerminal() {
         var state = ChatState()
         state.userSent("/hooks", now: now)

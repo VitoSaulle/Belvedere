@@ -151,7 +151,8 @@ final class HostedSession: Identifiable {
         switch route {
         case .send(let message):
             if !isRunning { resumeIfPossible() }
-            state.userSent(ImageAttachment.displayText(message, names: images.map(\.name)), now: Date())
+            let id = UUID().uuidString.lowercased()
+            state.userSent(ImageAttachment.displayText(message, names: images.map(\.name)), id: id, now: Date())
             // Senza processo il messaggio non parte: niente «al lavoro» e resta il motivo.
             guard isRunning else {
                 state.sendFailed(state.lastError ?? "\(agent.productName) non è avviato.", now: Date())
@@ -164,7 +165,7 @@ final class HostedSession: Identifiable {
                 for image in images {
                     do { payloads.append(try image.payload()) } catch { state.addNote("\(image.name) non si legge: non è stata inviata") }
                 }
-                write(StreamInput.user(message, images: payloads))
+                write(StreamInput.user(message, images: payloads, id: id))
             }
         case .setModel(let model):
             if codex != nil {
