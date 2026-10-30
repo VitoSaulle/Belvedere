@@ -74,6 +74,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Appearance.current.apply()
+        // La shell può metterci un attimo: si legge subito, così la prima sessione non aspetta.
+        DispatchQueue.global(qos: .userInitiated).async { _ = ShellEnvironment.current }
         hotKey = GlobalHotKey { [weak self] in self?.showMainWindow() }
         let notch = NotchController(model: model)
         notch.start()
