@@ -13,12 +13,16 @@ struct StatusDot: View {
             .frame(width: size, height: size)
             .background {
                 if status == .working || status == .waiting {
-                    Circle()
-                        .fill(color.opacity(0.35))
-                        .frame(width: size * 2, height: size * 2)
-                        .phaseAnimator([false, true]) { view, on in
-                            view.scaleEffect(on ? 1 : 0.5).opacity(on ? 0 : 1)
-                        } animation: { _ in .easeOut(duration: 1.4) }
+                    // A 15 fps: un'animazione a frequenza piena per ogni scheda tiene occupata tutta la finestra.
+                    TimelineView(.animation(minimumInterval: 1 / 15)) { context in
+                        let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                        let eased = 1 - (1 - phase) * (1 - phase)
+                        Circle()
+                            .fill(color.opacity(0.35))
+                            .frame(width: size * 2, height: size * 2)
+                            .scaleEffect(0.5 + 0.5 * eased)
+                            .opacity(1 - eased)
+                    }
                 }
             }
             .accessibilityLabel(Theme.label(for: status))

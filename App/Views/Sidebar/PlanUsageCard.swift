@@ -7,6 +7,14 @@ struct PlanUsageCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Chi cambia account con `/login` deve sapere di chi sono questi limiti.
+            if model.switchesAccounts, let account = model.accounts[model.profiles.active(.claude).id] {
+                Text(account.email)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
             if let five = model.planLimits?.fiveHour {
                 HStack {
                     Text("Finestra 5 h").font(.system(size: 12, weight: .medium))

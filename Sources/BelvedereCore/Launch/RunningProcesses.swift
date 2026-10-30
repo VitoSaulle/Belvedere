@@ -10,6 +10,12 @@ public enum RunningProcesses {
         return String(cString: real)
     }
 
+    /// Il PID è ancora di un processo con questo nome: un PID riusato non deve sembrare la stessa sessione.
+    public static func isRunning(_ pid: Int32, named name: String) -> Bool {
+        var buffer = [CChar](repeating: 0, count: 256)
+        return proc_name(pid, &buffer, UInt32(buffer.count)) > 0 && String(cString: buffer) == name
+    }
+
     /// Cartelle di lavoro dei processi con questo nome, esclusi i PID indicati.
     /// Belvedere la usa per non riprendere una sessione la cui cartella ha già un `claude` aperto.
     public static func folders(named name: String, excluding excluded: Set<Int32>) -> Set<String> {

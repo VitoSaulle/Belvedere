@@ -74,6 +74,12 @@ private struct ProfileRow: View {
                     .font(.caption)
                     .foregroundStyle(model.profileFolderMissing(profile) ? Theme.danger : .secondary)
                     .lineLimit(1)
+                if let account = model.accounts[profile.id] {
+                    Text(account.email)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             Button("Accedi") { model.login(profile) }

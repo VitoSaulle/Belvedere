@@ -74,6 +74,16 @@ final class AppModel {
     private(set) var busyFolders: [AgentKind: Set<String>]?
     /// Sessioni passate al terminale il cui processo è ancora vivo; aggiornato col tick, non a ogni ridisegno.
     private(set) var terminalOwned: Set<String> = []
+    /// I `claude` vivi che non sono di Belvedere, per sessione: dicono esattamente quale sessione è occupata.
+    private(set) var liveClaude: [String: LiveClaudeProcess] = [:]
+    /// Una sessione che non è passata dal terminale a Belvedere: il suo processo è ancora vivo.
+    var handOverFailure: String?
+    /// Account collegato in ciascun profilo Claude; cambia con `/login`.
+    private(set) var accounts: [UUID: ClaudeAccount] = [:]
+    /// Si è visto un `/login` cambiare account: da allora la sidebar dice a chi sono i limiti.
+    private(set) var switchesAccounts = UserDefaults.standard.bool(forKey: AppModel.switchesAccountsKey)
+    @ObservationIgnored private var accountStamps: [UUID: Date] = [:]
+    @ObservationIgnored private var lastAccountIDs = UserDefaults.standard.dictionary(forKey: AppModel.lastAccountsKey) as? [String: String] ?? [:]
     @ObservationIgnored private var savedWindows: [String: Int] = [:]
     @ObservationIgnored private var hookDuplicates = HookDeduplicator()
     /// Trasferimenti aperti (salvati su disco) e la chat che li conferma, con i turni già fatti all'inizio.
@@ -84,6 +94,9 @@ final class AppModel {
     static let welcomeKey = "welcomeShown"
     static let limitsKey = "lastClaudeLimits"
     static let limitsByProfileKey = "lastClaudeLimitsByProfile"
+    static let limitsByAccountKey = "lastClaudeLimitsByAccount"
+    static let lastAccountsKey = "lastClaudeAccounts"
+    static let switchesAccountsKey = "switchesClaudeAccounts"
     static let onlyActiveKey = "showOnlyActiveProfile"
     static let windowsKey = "knownContextWindows"
 
@@ -174,6 +187,7 @@ final class AppModel {
         store.setDefaults(defaultProfileIDs)
         plugins.profile = profiles.active(.claude)
         restoreLimits()
+        refreshAccounts()
         if let windows = UserDefaults.standard.dictionary(forKey: Self.windowsKey) as? [String: Int] {
             store.restore(knownWindows: windows)
             savedWindows = windows
@@ -421,12 +435,39 @@ final class AppModel {
             store.restore(claudeLimits: [profiles.defaultProfile(.claude).id: saved])
             saveLimits()
         }
+        if let data = defaults.data(forKey: Self.limitsByAccountKey),
+           let saved = try? JSONDecoder().decode([String: PlanLimits].self, from: data) {
+            store.restore(accountLimits: saved)
+        }
         store.tick(now: Date())
     }
 
     private func saveLimits() {
         let byProfile = Dictionary(uniqueKeysWithValues: store.claudeLimits.map { ($0.key.uuidString, $0.value) })
         if let data = try? JSONEncoder().encode(byProfile) { UserDefaults.standard.set(data, forKey: Self.limitsByProfileKey) }
+        if let data = try? JSONEncoder().encode(store.accountLimits) { UserDefaults.standard.set(data, forKey: Self.limitsByAccountKey) }
+    }
+
+    /// Rilegge `.claude.json` quando cambia e sposta i limiti se `/login` ha cambiato account nel profilo.
+    private func refreshAccounts() {
+        for profile in profiles.profiles(.claude) {
+            let file = ClaudeAccount.file(profile: profile, home: Belvedere.home)
+            let stamp = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            guard stamp != accountStamps[profile.id] else { continue }
+            accountStamps[profile.id] = stamp
+            let account = ClaudeAccount.read(profile: profile, home: Belvedere.home)
+            if account != accounts[profile.id] { accounts[profile.id] = account }
+            guard let account else { continue }
+            let key = profile.id.uuidString
+            if let last = lastAccountIDs[key], last != account.id {
+                store.switchAccount(profile: profile.id, from: last, to: account.id)
+                saveLimits()
+                switchesAccounts = true
+                UserDefaults.standard.set(true, forKey: Self.switchesAccountsKey)
+            }
+            lastAccountIDs[key] = account.id
+            UserDefaults.standard.set(lastAccountIDs, forKey: Self.lastAccountsKey)
+        }
     }
 
     /// Sessioni della Plancia e della sidebar: con «Solo profilo attivo» quelle degli altri profili escono.
@@ -459,8 +500,7 @@ final class AppModel {
     func canContinueElsewhere(_ s: SessionSnapshot) -> Bool {
         guard ![.working, .waiting].contains(s.status), !s.cwd.isEmpty, !s.transcriptPath.isEmpty,
               profiles.hasChoice(s.agent), !openTransfers.contains(where: { $0.sessionID == s.id }) else { return false }
-        guard let busy = busyFolders?[s.agent], !busy.contains(RunningProcesses.canonical(s.cwd)) else { return false }
-        return !terminalOwned.contains(s.id)
+        return isFreeOutside(s)
     }
 
     /// Sposta la conversazione nel profilo e la riprende lì. L'originale si cancella alla prima risposta riuscita;
@@ -634,7 +674,8 @@ final class AppModel {
         host.resumeBlocker = { [weak self, weak host] in
             guard let self, let host else { return nil }
             let folder = host.state.cwd ?? host.options.folder
-            guard self.agentFolders(host.agent).contains(RunningProcesses.canonical(folder)) else { return nil }
+            let taken = host.state.sessionID.map { self.liveClaude[$0] != nil } ?? false
+            guard taken || self.agentFolders(host.agent).contains(RunningProcesses.canonical(folder)) else { return nil }
             return "\(host.agent.productName) è già aperto in questa cartella, ad esempio in un terminale: chiudilo per continuare qui."
         }
         hostedSessions.append(host)
@@ -664,19 +705,70 @@ final class AppModel {
     /// «Riprendi in Belvedere» solo se la sessione non è viva altrove: mai due processi sulla stessa sessione.
     func canResumeHere(_ s: SessionSnapshot) -> Bool {
         guard !s.cwd.isEmpty, !isHosted(s.id) else { return false }
-        // Se nessun `claude` (o `codex`) di altri lavora in quella cartella, la sessione non è viva altrove:
+        return isFreeOutside(s)
+    }
+
+    /// Nessun processo di altri tiene la sessione.
+    private func isFreeOutside(_ s: SessionSnapshot) -> Bool {
+        // Se nessun `claude` (o `codex`) sconosciuto lavora in quella cartella, la sessione non è viva altrove:
         // vale anche dopo un crash (log fermo su «al lavoro») e per le sessioni nate prima di Belvedere.
-        guard let busy = busyFolders?[s.agent], !busy.contains(RunningProcesses.canonical(s.cwd)) else { return false }
+        let folder = RunningProcesses.canonical(s.cwd)
+        guard let busy = busyFolders?[s.agent], !busy.contains(folder), liveClaude[s.id] == nil else { return false }
+        // Un `/resume` dentro il terminale potrebbe non aver ancora aggiornato il registro: se la sessione
+        // sembra attiva e nella sua cartella c'è un `claude`, non si tocca.
+        if s.agent == .claude, [.working, .waiting].contains(s.status),
+           liveClaude.values.contains(where: { RunningProcesses.canonical($0.cwd) == folder }) { return false }
         // Passata al terminale: finché quel processo vive, anche prima dei suoi hook, la sessione è sua.
         return !terminalOwned.contains(s.id)
     }
 
-    /// Cartelle dei `claude` o `codex` vivi, esclusi quelli lanciati da Belvedere.
+    // MARK: - Dal terminale a Belvedere
+
+    /// Sessione aperta nella CLI in un terminale o nell'IDE: si può portare qui.
+    func canHandOver(_ s: SessionSnapshot) -> Bool {
+        !isHosted(s.id) && liveClaude[s.id]?.canHandOver == true
+    }
+
+    /// Solo tra un turno e l'altro: chiudere la CLI a metà interromperebbe il lavoro.
+    func handOverReady(_ s: SessionSnapshot) -> Bool {
+        canHandOver(s) && liveClaude[s.id]?.isIdle == true && ![.working, .waiting].contains(s.status)
+    }
+
+    /// Chiude la CLI con SIGTERM, come farebbe il sistema, e riprende la conversazione qui.
+    func handOver(_ sessionID: String) async {
+        guard let s = session(sessionID), handOverReady(s) else { return }
+        handOverFailure = nil
+        // Il registro letto dal tick ha fino a 5 s: si decide su quello di adesso.
+        let dirs = profiles.profiles(.claude).map(\.configDir)
+        guard let process = ClaudeRegistry.live(configDirs: dirs).first(where: { $0.sessionID == sessionID }),
+              process.canHandOver, process.isIdle, kill(process.pid, SIGTERM) == 0 else {
+            handOverFailure = sessionID
+            return
+        }
+        for _ in 0..<50 where RunningProcesses.isRunning(process.pid, named: "claude") {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard !RunningProcesses.isRunning(process.pid, named: "claude") else {
+            handOverFailure = sessionID
+            return
+        }
+        refreshBusyFolders()
+        resume(sessionID)
+    }
+
+    /// Cartelle dei `claude` o `codex` vivi, esclusi quelli lanciati da Belvedere. Chi è nel registro
+    /// occupa solo la sua sessione: la cartella resta occupata per i `claude` sconosciuti.
     private func agentFolders(_ agent: AgentKind) -> Set<String> {
-        RunningProcesses.folders(named: agent.rawValue, excluding: Set(hostedSessions.compactMap(\.pid)))
+        let known = agent == .claude ? liveClaude.values.map(\.pid) : []
+        return RunningProcesses.folders(named: agent.rawValue, excluding: Set(hostedSessions.compactMap(\.pid) + known))
     }
 
     private func refreshBusyFolders() {
+        let hostedPIDs = Set(hostedSessions.compactMap(\.pid))
+        let dirs = profiles.profiles(.claude).map(\.configDir)
+        let live = ClaudeRegistry.live(configDirs: dirs).filter { !hostedPIDs.contains($0.pid) }
+        let byID = Dictionary(live.map { ($0.sessionID, $0) }, uniquingKeysWith: { first, _ in first })
+        if byID != liveClaude { liveClaude = byID }
         let folders = Dictionary(uniqueKeysWithValues: AgentKind.allCases.map { ($0, agentFolders($0)) })
         if folders != busyFolders { busyFolders = folders }
         let owned = Set(Self.handoffIDs().union(handedOff).filter { id in
@@ -911,6 +1003,7 @@ final class AppModel {
 
     private func tick() {
         refreshBusyFolders()
+        refreshAccounts()
         store.tick(now: Date())
         publish()
     }
