@@ -37,7 +37,7 @@ final class HostedSession: Identifiable {
     var agent: AgentKind { options.agent }
 
     var binary: String? {
-        let env = ProcessInfo.processInfo.environment
+        let env = ShellEnvironment.current
         let isExecutable = { FileManager.default.isExecutableFile(atPath: $0) }
         return agent == .claude
             ? ClaudeCommand.locateBinary(home: NSHomeDirectory(), path: env["PATH"], isExecutable: isExecutable)
@@ -58,7 +58,7 @@ final class HostedSession: Identifiable {
             changed()
             return
         }
-        let base = ProcessInfo.processInfo.environment
+        let base = ShellEnvironment.current
         let args = agent == .claude
             ? ClaudeCommand.arguments(options, isGitRepository: GitInfo.isRepository(options.folder))
             : CodexCommand.arguments

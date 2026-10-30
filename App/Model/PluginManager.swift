@@ -75,7 +75,7 @@ final class PluginManager {
 
     /// Esegue `claude` con gli argomenti dati; i comandi di progetto partono nella cartella del progetto.
     private nonisolated static func run(_ arguments: [String], in folder: String?, profile: Profile?) async -> Output {
-        let env = ProcessInfo.processInfo.environment
+        let env = ShellEnvironment.current
         guard let binary = ClaudeCommand.locateBinary(home: NSHomeDirectory(), path: env["PATH"],
                                                       isExecutable: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return Output(code: -1, stdout: Data(), stderr: Data())
