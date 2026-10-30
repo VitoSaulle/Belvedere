@@ -16,6 +16,7 @@ import SwiftUI
 struct SessionInspector: View {
     @Environment(AppModel.self) private var model
     let sessionID: String
+    @State private var shownFile: FileChange?
 
     var body: some View {
         let host = model.host(for: sessionID)
@@ -96,23 +97,28 @@ struct SessionInspector: View {
                             Text("Nessuno").font(.system(size: 12)).foregroundStyle(.secondary)
                         }
                         ForEach(s.filesChanged.suffix(12), id: \.path) { file in
-                            HStack(spacing: 6) {
-                                Text((file.path as NSString).lastPathComponent)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .help(file.path)
-                                Spacer()
-                                Text("+\(file.added)").foregroundStyle(Theme.done)
-                                Text("−\(file.removed)").foregroundStyle(Theme.danger)
+                            Button { shownFile = file } label: {
+                                HStack(spacing: 6) {
+                                    Text((file.path as NSString).lastPathComponent)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    Spacer()
+                                    Text("+\(file.added)").foregroundStyle(Theme.done)
+                                    Text("−\(file.removed)").foregroundStyle(Theme.danger)
+                                }
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .monospacedDigit()
+                                .contentShape(Rectangle())
                             }
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .monospacedDigit()
+                            .buttonStyle(.plain)
+                            .help(file.path)
                         }
                     }
                 }
                 .padding(16)
             }
+            .sheet(item: $shownFile) { FileDiffSheet(file: $0, transcript: s.transcriptPath) }
         }
     }
 
