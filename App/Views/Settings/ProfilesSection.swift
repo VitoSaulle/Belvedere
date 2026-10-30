@@ -57,7 +57,9 @@ private struct ProfileRow: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
+                    // Senza `labelsHidden` il Form impagina il campo su due colonne e la riga lo sfonda.
                     TextField("Nome", text: $name)
+                        .labelsHidden()
                         .textFieldStyle(.plain)
                         .fixedSize()
                         .onSubmit { model.renameProfile(profile.id, to: name) }
