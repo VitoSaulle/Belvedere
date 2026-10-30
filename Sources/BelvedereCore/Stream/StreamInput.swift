@@ -9,13 +9,20 @@ public enum HostDecision: Equatable, Sendable {
 
 /// Righe da scrivere su stdin di `claude -p --input-format stream-json`.
 public enum StreamInput {
-    public static func user(_ text: String, images: [ImagePayload] = []) -> Data {
-        guard !images.isEmpty else { return line(["type": "user", "message": ["role": "user", "content": text]]) }
+    /// `id` torna nell'eco della CLI (`--replay-user-messages`): così il messaggio non compare due volte.
+    public static func user(_ text: String, images: [ImagePayload] = [], id: String? = nil) -> Data {
+        var envelope: [String: Any] = ["type": "user"]
+        if let id { envelope["uuid"] = id }
+        guard !images.isEmpty else {
+            envelope["message"] = ["role": "user", "content": text]
+            return line(envelope)
+        }
         var blocks: [[String: Any]] = images.map {
             ["type": "image", "source": ["type": "base64", "media_type": $0.mediaType, "data": $0.base64]]
         }
         if !text.isEmpty { blocks.append(["type": "text", "text": text]) }
-        return line(["type": "user", "message": ["role": "user", "content": blocks]])
+        envelope["message"] = ["role": "user", "content": blocks]
+        return line(envelope)
     }
 
     public static func initialize(requestID: String) -> Data {

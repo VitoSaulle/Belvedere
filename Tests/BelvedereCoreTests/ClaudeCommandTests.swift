@@ -7,7 +7,8 @@ import Testing
         let args = ClaudeCommand.arguments(LaunchOptions(folder: "/p"), isGitRepository: false)
         #expect(args == ClaudeCommand.baseArguments)
         #expect(ClaudeCommand.baseArguments == ["-p", "--input-format", "stream-json", "--output-format", "stream-json",
-                                                "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"])
+                                                "--verbose", "--include-partial-messages", "--replay-user-messages",
+                                                "--permission-prompt-tool", "stdio"])
         for choice in PermissionChoice.allCases {
             #expect(!ClaudeCommand.arguments(LaunchOptions(folder: "/p", permission: choice), isGitRepository: true).contains("--bare"))
         }

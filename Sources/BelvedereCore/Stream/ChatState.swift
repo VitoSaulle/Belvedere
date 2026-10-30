@@ -34,6 +34,8 @@ public struct ChatState: Sendable {
     /// Un messaggio scritto mentre Claude lavorava: la CLI lo esegue dopo il `result` del turno in corso
     /// (anche dopo un'interruzione), unendo in un turno solo tutti quelli in coda.
     var queuedTurn = false
+    /// L'ultimo messaggio in coda: se la sua eco arriva prima del `result`, la CLI l'ha unito al turno in corso.
+    var lastQueuedID: String?
     public var lastActivity: Date?
     /// Turni chiusi senza errore: il primo conferma il passaggio della conversazione a un altro profilo.
     public var completedTurns = 0
@@ -74,6 +76,18 @@ public struct ChatState: Sendable {
                let output = Self.localOutput(text) {
                 upsert(.assistant(id: json["uuid"]?.stringValue ?? UUID().uuidString, text: output))
                 return
+            }
+            if json["type"]?.stringValue == "user" {
+                // Testo aggiunto dalla CLI, come il riassunto di `/compact`: non l'ha scritto nessuno.
+                if json["isSynthetic"] == .bool(true) { return }
+                if json["isReplay"] == .bool(true) {
+                    // L'eco di un messaggio scritto qui; quello che manca arriva da Remote Control.
+                    if let id = json["uuid"]?.stringValue, items.contains(where: { $0.id == id }) {
+                        if id == lastQueuedID { queuedTurn = false }
+                        return
+                    }
+                    if status != .waiting { status = .working }
+                }
             }
             let parsed = TranscriptMessages.claudeItems(object)
             parsed.forEach { upsert($0) }
@@ -143,9 +157,12 @@ public struct ChatState: Sendable {
         }
     }
 
-    public mutating func userSent(_ text: String, now: Date) {
-        if status == .working || status == .waiting { queuedTurn = true }
-        items.append(.user(id: "local-\(UUID().uuidString)", text: text))
+    public mutating func userSent(_ text: String, id: String = "local-\(UUID().uuidString)", now: Date) {
+        if status == .working || status == .waiting {
+            queuedTurn = true
+            lastQueuedID = id
+        }
+        items.append(.user(id: id, text: text))
         status = asks.isEmpty ? .working : .waiting
         lastError = nil
         unavailableCommand = nil

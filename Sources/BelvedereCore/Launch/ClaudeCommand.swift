@@ -3,7 +3,8 @@ import Foundation
 /// Riga di comando e ambiente del processo `claude` lanciato da Belvedere.
 public enum ClaudeCommand {
     public static let baseArguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json",
-                                       "--verbose", "--include-partial-messages", "--permission-prompt-tool", "stdio"]
+                                       "--verbose", "--include-partial-messages", "--replay-user-messages",
+                                       "--permission-prompt-tool", "stdio"]
 
     public static func arguments(_ o: LaunchOptions, isGitRepository: Bool) -> [String] {
         baseArguments + variableArguments(o, isGitRepository: isGitRepository)
