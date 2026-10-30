@@ -37,6 +37,8 @@ public struct LiveSessionStore: Sendable {
     private var hosted: [String: SessionSnapshot] = [:]
     /// Ultimi limiti letti dalla status line, per profilo: l'app li salva e li ripristina all'avvio.
     public private(set) var claudeLimits: [UUID: PlanLimits] = [:]
+    /// Ultimi limiti degli account usciti con `/login`, per id dell'account.
+    public private(set) var accountLimits: [String: PlanLimits] = [:]
     /// Finestra di contesto per modello Claude, vista da status line e chat ospitate: il log non la dice.
     /// L'app la salva e la ripristina all'avvio.
     public private(set) var knownWindows: [String: Int] = [:]
@@ -157,6 +159,17 @@ public struct LiveSessionStore: Sendable {
 
     public mutating func restore(claudeLimits limits: [UUID: PlanLimits]) {
         claudeLimits = limits
+    }
+
+    /// `/login` ha cambiato account nel profilo: i limiti visti finora restano al vecchio account
+    /// e tornano quando si rientra, così non si attribuiscono al nuovo.
+    public mutating func switchAccount(profile: UUID, from old: String?, to new: String) {
+        if let old { accountLimits[old] = claudeLimits[profile] }
+        claudeLimits[profile] = accountLimits[new]
+    }
+
+    public mutating func restore(accountLimits limits: [String: PlanLimits]) {
+        accountLimits = limits
     }
 
     public mutating func apply(codexLimits limits: [UUID: PlanLimits]) {

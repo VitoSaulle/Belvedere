@@ -1,3 +1,4 @@
+import AppKit
 import BelvedereCore
 import SwiftUI
 
@@ -97,8 +98,11 @@ struct ReadOnlyBar: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "eye").foregroundStyle(.secondary)
-            Text(model.canResumeHere(session) ? "Sessione ferma" : "Solo osservazione").foregroundStyle(.secondary)
+            Text(statusText).foregroundStyle(.secondary)
             Spacer()
+            if model.canHandOver(session) {
+                HandOverButton(session: session)
+            }
             if model.canResumeHere(session) {
                 Button {
                     model.resume(session.id)
@@ -134,6 +138,43 @@ struct ReadOnlyBar: View {
         .padding(.bottom, 14)
         .frame(maxWidth: 760)
     }
+
+    private var statusText: String {
+        if model.handOverFailure == session.id { return "Il terminale non si è chiuso" }
+        if model.canHandOver(session) { return "Aperta in \(session.origin?.appName ?? "un terminale")" }
+        return model.canResumeHere(session) ? "Sessione ferma" : "Solo osservazione"
+    }
+}
+
+/// «Passa a Belvedere»: chiude la CLI nel terminale, dopo una conferma, e continua la conversazione qui.
+struct HandOverButton: View {
+    @Environment(AppModel.self) private var model
+    let session: SessionSnapshot
+
+    var body: some View {
+        let ready = model.handOverReady(session)
+        Button {
+            guard confirmHandOver(session) else { return }
+            Task { await model.handOver(session.id) }
+        } label: {
+            Label("Passa a Belvedere", systemImage: "arrow.down.forward.and.arrow.up.backward")
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
+        .disabled(!ready)
+        .help(ready ? "Chiude Claude Code nel terminale e continua la conversazione qui"
+                    : "Disponibile quando la sessione ha finito il turno")
+    }
+}
+
+@MainActor func confirmHandOver(_ session: SessionSnapshot) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = "Passare la sessione a Belvedere?"
+    alert.informativeText = "Claude Code si chiude in \(session.origin?.appName ?? "terminale") e la conversazione continua qui. "
+        + "Quello che hai scritto nel terminale senza inviarlo si perde."
+    alert.addButton(withTitle: "Passa a Belvedere")
+    alert.addButton(withTitle: "Annulla")
+    return alert.runModal() == .alertFirstButtonReturn
 }
 
 /// Passaggio a un altro profilo dalla chat: proposto quando la sessione si ferma per il limite del piano,

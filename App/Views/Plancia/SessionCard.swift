@@ -42,6 +42,13 @@ struct SessionCard: View {
             if model.canResumeHere(session) {
                 Button("Riprendi in Belvedere") { model.resume(session.id) }
             }
+            if model.canHandOver(session) {
+                Button("Passa a Belvedere") {
+                    guard confirmHandOver(session) else { return }
+                    Task { await model.handOver(session.id) }
+                }
+                .disabled(!model.handOverReady(session))
+            }
             if session.origin != nil {
                 Button("Vai a \(session.origin!.appName)") { model.activateOrigin(of: session.id) }
             }
@@ -106,17 +113,8 @@ struct SessionCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.color(for: session.status))
             }
-            Text(session.lastText.map(Self.inline) ?? AttributedString(Fmt.folder(session.cwd)))
-                .font(.system(size: 12.5))
-                .foregroundStyle(.primary.opacity(0.75))
-                .lineLimit(2, reservesSpace: true)
+            CardPreview(text: session.lastText, fallback: Fmt.folder(session.cwd))
         }
-    }
-
-    /// Anteprima su due righe: grassetti e `codice` resi, il resto del markdown lasciato com'è.
-    static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
     }
 
     private var footer: some View {
@@ -139,6 +137,25 @@ struct SessionCard: View {
             return Fmt.duration(Date().timeIntervalSince(start))
         }
         return Fmt.ago(session.lastActivity)
+    }
+}
+
+/// Anteprima su due righe: grassetti e `codice` resi, il resto del markdown lasciato com'è.
+/// Vista a parte: il testo si analizza solo quando cambia, non a ogni hover della scheda.
+private struct CardPreview: View {
+    let text: String?
+    let fallback: String
+
+    var body: some View {
+        Text(text.map(Self.inline) ?? AttributedString(fallback))
+            .font(.system(size: 12.5))
+            .foregroundStyle(.primary.opacity(0.75))
+            .lineLimit(2, reservesSpace: true)
+    }
+
+    private static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
     }
 }
 
