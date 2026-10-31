@@ -58,6 +58,8 @@ struct PlanciaView: View {
             Text(ids.count == 1 ? "1 sessione selezionata" : "\(ids.count) sessioni selezionate")
                 .font(.system(size: 12.5, weight: .medium))
             Spacer()
+            Button("Seleziona tutte") { model.cardSelection.selectAll(visible.map(\.id)) }
+                .disabled(ids.count == visible.count)
             Button("Nascondi", systemImage: "eye.slash") { model.hide(ids) }
             DeleteButton(sessionIDs: ids)
             Button("Annulla") { model.cardSelection = SessionSelection() }
@@ -260,16 +262,43 @@ struct BulkMenuItems: View {
     }
 }
 
-/// «Nascondi» ed «Elimina…» su tutte le sessioni di un progetto. La cartella non si tocca.
+/// «Nascondi» ed «Elimina…» su un progetto: la cartella con le sue sessioni, o le sole sessioni.
 struct ProjectMenuItems: View {
     @Environment(AppModel.self) private var model
     let path: String
 
     var body: some View {
-        let ids = model.sessionIDs(inProject: path)
+        let ids = model.projectSessionIDs(path)
         Button("Nascondi il progetto \(Fmt.folder(path))", systemImage: "eye.slash") { model.hide(ids) }
-        DeleteButton(sessionIDs: ids, title: "Elimina le sessioni di \(Fmt.folder(path)) (\(ids.count))…")
+        DeleteProjectsButton(paths: [path])
+        DeleteButton(sessionIDs: ids, title: "Elimina solo le sessioni (\(ids.count))…")
     }
+}
+
+/// Elimina i progetti, cartelle e sessioni, dopo una conferma.
+struct DeleteProjectsButton: View {
+    @Environment(AppModel.self) private var model
+    let paths: [String]
+
+    var body: some View {
+        Button(paths.count == 1 ? "Elimina il progetto \(Fmt.folder(paths[0]))…" : "Elimina \(paths.count) progetti…",
+               systemImage: "trash.fill", role: .destructive) {
+            let sessions = Set(paths.flatMap(model.projectSessionIDs)).count
+            guard confirmProjectDeletion(paths, sessions: sessions) else { return }
+            Task { await model.deleteProjects(paths) }
+        }
+    }
+}
+
+@MainActor func confirmProjectDeletion(_ paths: [String], sessions: Int) -> Bool {
+    let alert = NSAlert()
+    alert.alertStyle = .critical
+    alert.messageText = paths.count == 1 ? "Eliminare il progetto?" : "Eliminare \(paths.count) progetti?"
+    alert.informativeText = paths.joined(separator: "\n") + "\n\nLa cartella va nel Cestino con tutto il contenuto. "
+        + "Le \(sessions) sessioni si cancellano subito e quelle aperte vengono chiuse."
+    alert.addButton(withTitle: "Elimina").hasDestructiveAction = true
+    alert.addButton(withTitle: "Annulla")
+    return alert.runModal() == .alertFirstButtonReturn
 }
 
 /// «Continua con…»: la conversazione passa a un altro profilo della stessa CLI.
@@ -291,19 +320,18 @@ struct ContinueMenu: View {
     }
 }
 
-/// Elimina le sessioni dal disco, dopo una conferma: i file non passano dal Cestino.
+/// Elimina le sessioni dal disco, anche quelle aperte, dopo una conferma: i file non passano dal Cestino.
 struct DeleteButton: View {
     @Environment(AppModel.self) private var model
     let sessionIDs: [String]
     var title = "Elimina…"
 
     var body: some View {
-        let deletable = sessionIDs.filter { id in model.session(id).map(model.canDelete) ?? false }
         Button(title, systemImage: "trash", role: .destructive) {
-            guard confirmDeletion(deletable.count) else { return }
-            Task { await model.delete(deletable) }
+            guard confirmDeletion(sessionIDs.count) else { return }
+            Task { await model.delete(sessionIDs) }
         }
-        .disabled(deletable.isEmpty)
+        .disabled(sessionIDs.isEmpty)
     }
 }
 
@@ -312,7 +340,7 @@ struct DeleteButton: View {
     alert.alertStyle = .warning
     alert.messageText = count == 1 ? "Eliminare la sessione?" : "Eliminare \(count) sessioni?"
     alert.informativeText = "I file della trascrizione vengono cancellati subito, senza passare dal Cestino, "
-        + "e non si potranno più riprendere. Le cartelle dei progetti e le statistiche d'uso restano."
+        + "e non si potranno più riprendere. Quelle aperte vengono chiuse. Le cartelle dei progetti e le statistiche d'uso restano."
     alert.addButton(withTitle: "Elimina").hasDestructiveAction = true
     alert.addButton(withTitle: "Annulla")
     return alert.runModal() == .alertFirstButtonReturn

@@ -22,6 +22,10 @@ public struct SessionSelection: Equatable, Sendable {
         ids.formUnion(order[min(from, to)...max(from, to)])
     }
 
+    public mutating func selectAll(_ all: [String]) {
+        ids = Set(all)
+    }
+
     /// Su cosa agisce il menu di `id`: tutta la selezione se ne fa parte, altrimenti solo lei.
     public func targets(for id: String) -> [String] {
         ids.contains(id) ? ids.sorted() : [id]

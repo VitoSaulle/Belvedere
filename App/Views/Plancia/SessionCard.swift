@@ -33,6 +33,7 @@ struct SessionCard: View {
         .padding(14)
         .background(cardFill, in: .rect(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(border, lineWidth: selected ? 2 : session.status == .waiting ? 1.5 : 1))
+        .overlay(alignment: .topLeading) { selectionMark }
         .shadow(color: .black.opacity(hovering ? 0.12 : 0.06), radius: hovering ? 18 : 12, y: hovering ? 8 : 4)
         .offset(y: hovering ? -2 : 0)
         .animation(.smooth(duration: 0.18), value: hovering)
@@ -53,14 +54,29 @@ struct SessionCard: View {
 
     private var selected: Bool { model.cardSelection.ids.contains(session.id) }
 
+    /// Il cerchietto si vede passandoci sopra, o su tutte le schede mentre si sta selezionando.
+    @ViewBuilder private var selectionMark: some View {
+        if hovering || !model.cardSelection.isEmpty {
+            Button { model.cardSelection.toggle(session.id) } label: {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(selected ? Theme.accent : Color.secondary)
+                    .background(Circle().fill(cardFill))
+            }
+            .buttonStyle(.plain)
+            .offset(x: -7, y: -7)
+            .help(selected ? "Togli dalla selezione" : "Seleziona")
+            .accessibilityLabel(selected ? "Togli \(session.displayName) dalla selezione" : "Seleziona \(session.displayName)")
+        }
+    }
+
     private func click() {
         let flags = NSEvent.modifierFlags
         if flags.contains(.shift) {
             model.cardSelection.extend(to: session.id, in: order)
-        } else if flags.contains(.command) {
+        } else if flags.contains(.command) || !model.cardSelection.isEmpty {
             model.cardSelection.toggle(session.id)
         } else {
-            model.cardSelection = SessionSelection()
             model.route = .session(session.id)
         }
     }

@@ -30,6 +30,13 @@ import Testing
         #expect(s.ids == ["b"])
     }
 
+    @Test func selectAllTakesWhatIsVisible() {
+        var s = SessionSelection()
+        s.toggle("z")
+        s.selectAll(order)
+        #expect(s.ids == Set(order))
+    }
+
     @Test func menuActsOnTheSelectionOnlyFromInsideIt() {
         var s = SessionSelection()
         s.toggle("a")
