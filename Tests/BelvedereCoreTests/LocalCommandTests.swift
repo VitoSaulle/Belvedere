@@ -51,6 +51,12 @@ import Testing
         #expect(!text.contains(".claude/CLAUDE.md"))
     }
 
+    @Test func memoryDoesNotRepeatTheConfigFile() {
+        _ = dir.file("progetto/.claude/CLAUDE.md")
+        let text = LocalCommand.memory.report(ChatState(), folder: project, configDir: project + "/.claude")
+        #expect(text.split(separator: "\n").count == 2)
+    }
+
     @Test func skillsPreferTheInitListAndKeepDescriptions() {
         var state = ChatState()
         state.commands = [SlashCommand(name: "pdf", description: "Lavora sui PDF", argumentHint: ""),

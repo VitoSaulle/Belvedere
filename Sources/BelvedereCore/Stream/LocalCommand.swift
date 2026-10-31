@@ -41,7 +41,9 @@ public enum LocalCommand: String, CaseIterable, Sendable {
         }
         let slug = folder.replacingOccurrences(of: "[^a-zA-Z0-9]", with: "-", options: .regularExpression)
         candidates.append("\(configDir)/projects/\(slug)/memory/MEMORY.md")
-        let found = candidates.filter { FileManager.default.fileExists(atPath: $0) }
+        // La cartella di configurazione può stare sul percorso del progetto: `~/.claude` sotto la home.
+        var seen = Set<String>()
+        let found = candidates.filter { FileManager.default.fileExists(atPath: $0) && seen.insert($0).inserted }
         guard !found.isEmpty else { return "**Memoria**\nNessun file di memoria per questa cartella." }
         return (["**Memoria**"] + found.map { "- \(link($0))" }).joined(separator: "\n")
     }
