@@ -5,6 +5,8 @@ enum Route: Hashable {
     case plancia
     case session(String)
     case stats
+    /// Solo per la selezione della sidebar: `model.route` resta `.plancia` con il filtro del progetto.
+    case project(String)
 }
 
 struct MainWindow: View {
@@ -41,7 +43,7 @@ struct MainWindow: View {
 
     @ViewBuilder private var detail: some View {
         switch model.route {
-        case .plancia:
+        case .plancia, .project:
             PlanciaView()
                 .inspector(isPresented: $showInspector) {
                     PlanciaInspector()

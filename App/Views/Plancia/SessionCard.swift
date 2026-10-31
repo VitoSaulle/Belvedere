@@ -5,6 +5,8 @@ struct SessionCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var scheme
     let session: SessionSnapshot
+    /// Le sessioni come si vedono, per estendere la selezione con ⇧.
+    let order: [String]
     @State private var hovering = false
 
     var body: some View {
@@ -30,33 +32,66 @@ struct SessionCard: View {
         .opacity(dimmed ? 0.55 : 1)
         .padding(14)
         .background(cardFill, in: .rect(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(border, lineWidth: session.status == .waiting ? 1.5 : 1))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(border, lineWidth: selected ? 2 : session.status == .waiting ? 1.5 : 1))
         .shadow(color: .black.opacity(hovering ? 0.12 : 0.06), radius: hovering ? 18 : 12, y: hovering ? 8 : 4)
         .offset(y: hovering ? -2 : 0)
         .animation(.smooth(duration: 0.18), value: hovering)
         .onHover { hovering = $0 }
         .contentShape(.rect(cornerRadius: 18))
-        .onTapGesture { model.route = .session(session.id) }
+        .onTapGesture { click() }
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .contextMenu {
-            Button("Apri") { model.route = .session(session.id) }
-            if model.canResumeHere(session) {
-                Button("Riprendi in Belvedere") { model.resume(session.id) }
+            let targets = model.cardSelection.targets(for: session.id)
+            if targets.count > 1 {
+                BulkMenuItems(sessionIDs: targets)
+                Button("Annulla la selezione") { model.cardSelection = SessionSelection() }
+            } else {
+                menuItems
             }
-            if model.canHandOver(session) {
-                Button("Passa a Belvedere") {
-                    guard confirmHandOver(session, backgroundShell: model.liveClaude[session.id]?.hasBackgroundShell == true) else { return }
-                    Task { await model.handOver(session.id) }
-                }
-                .disabled(!model.handOverReady(session))
+        }
+    }
+
+    private var selected: Bool { model.cardSelection.ids.contains(session.id) }
+
+    private func click() {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.shift) {
+            model.cardSelection.extend(to: session.id, in: order)
+        } else if flags.contains(.command) {
+            model.cardSelection.toggle(session.id)
+        } else {
+            model.cardSelection = SessionSelection()
+            model.route = .session(session.id)
+        }
+    }
+
+    @ViewBuilder private var menuItems: some View {
+        Button("Apri") { model.route = .session(session.id) }
+        if model.canResumeHere(session) {
+            Button("Riprendi in Belvedere") { model.resume(session.id) }
+        }
+        if model.canHandOver(session) {
+            Button("Passa a Belvedere") {
+                guard confirmHandOver(session, backgroundShell: model.liveClaude[session.id]?.hasBackgroundShell == true) else { return }
+                Task { await model.handOver(session.id) }
             }
-            if session.origin != nil {
-                Button("Vai a \(session.origin!.appName)") { model.activateOrigin(of: session.id) }
-            }
-            ContinueMenu(session: session)
-            Button("Mostra la cartella nel Finder") {
-                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.cwd)
-            }
-            .disabled(session.cwd.isEmpty)
+            .disabled(!model.handOverReady(session))
+        }
+        if session.origin != nil {
+            Button("Vai a \(session.origin!.appName)") { model.activateOrigin(of: session.id) }
+        }
+        Button("Mostra la cartella nel Finder") {
+            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: session.cwd)
+        }
+        .disabled(session.cwd.isEmpty)
+        Divider()
+        Button(selected ? "Togli dalla selezione" : "Seleziona", systemImage: "checkmark.circle") {
+            model.cardSelection.toggle(session.id)
+        }
+        SessionMenuItems(sessionID: session.id)
+        if !session.cwd.isEmpty {
+            Divider()
+            ProjectMenuItems(path: session.cwd)
         }
     }
 
@@ -69,7 +104,8 @@ struct SessionCard: View {
     }
 
     private var border: Color {
-        session.status == .waiting ? Theme.waiting.opacity(0.55) : Color.primary.opacity(0.07)
+        if selected { return Theme.accent }
+        return session.status == .waiting ? Theme.waiting.opacity(0.55) : Color.primary.opacity(0.07)
     }
 
     private var header: some View {
