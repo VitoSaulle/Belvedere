@@ -123,7 +123,15 @@ private struct SidebarMenuItems: View {
             ProjectMenuItems(path: path)
         } else if !ids.isEmpty {
             BulkMenuItems(sessionIDs: ids)
+            if !folders.isEmpty { DeleteProjectsButton(paths: folders) }
         }
+    }
+
+    private var folders: [String] {
+        rows.compactMap { row in
+            guard case .project(let path) = row else { return nil }
+            return path
+        }.sorted()
     }
 
     private var single: (session: String?, project: String?) {
@@ -138,7 +146,7 @@ private struct SidebarMenuItems: View {
         var ids = Set<String>()
         for row in rows {
             if case .session(let id) = row { ids.insert(id) }
-            if case .project(let path) = row { ids.formUnion(model.sessionIDs(inProject: path)) }
+            if case .project(let path) = row { ids.formUnion(model.projectSessionIDs(path)) }
         }
         return ids.sorted()
     }

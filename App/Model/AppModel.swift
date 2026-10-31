@@ -143,7 +143,7 @@ final class AppModel {
 
     // MARK: - Eliminazione
 
-    /// Si elimina solo una sessione ferma: non al lavoro, non in attesa, non aperta in Belvedere.
+    /// Ferma e non aperta in Belvedere: la pulizia in blocco delle vecchie non tocca altro.
     func canDelete(_ s: SessionSnapshot) -> Bool {
         [.done, .idle, .ended].contains(s.status) && !isHosted(s.id)
     }
@@ -155,8 +155,9 @@ final class AppModel {
 
     /// Cancella dal disco i file delle sessioni, senza passare dal Cestino. Le statistiche restano.
     func delete(_ ids: [String]) async {
-        let ids = Set(ids.filter { id in session(id).map(canDelete) ?? false })
+        let ids = Set(ids)
         guard !ids.isEmpty else { return }
+        await stopHosts(ids)
         let deleted = Set(await index.delete(sessionIDs: ids))
         guard !deleted.isEmpty else { return }
         hostedSessions.removeAll { !$0.isRunning && deleted.contains($0.state.sessionID ?? "") }
@@ -167,6 +168,36 @@ final class AppModel {
         store.forget(deleted)
         syncHosted()
         await saveIndex()
+    }
+
+    private func stopHosts(_ ids: Set<String>) async {
+        for host in hostedSessions where ids.contains(host.state.sessionID ?? "") { await host.stop() }
+    }
+
+    /// Sessioni di un progetto, sottocartelle comprese. La home non è un progetto: lì solo quelle aperte proprio in `~`.
+    func projectSessionIDs(_ path: String) -> [String] {
+        guard ProjectFolder.isProject(path, home: NSHomeDirectory()) else { return sessionIDs(inProject: path) }
+        return allSessions.filter { !$0.cwd.isEmpty && ProjectFolder.contains(path, $0.cwd) }.map(\.id)
+    }
+
+    /// Cartella nel Cestino, o cancellata dove il Cestino non c'è, e tutte le sessioni del progetto.
+    func deleteProjects(_ paths: [String]) async {
+        let fm = FileManager.default
+        for path in paths {
+            let ids = projectSessionIDs(path)
+            await stopHosts(Set(ids))
+            if ProjectFolder.isProject(path, home: NSHomeDirectory()), fm.fileExists(atPath: path) {
+                let url = URL(fileURLWithPath: path)
+                do {
+                    if (try? fm.trashItem(at: url, resultingItemURL: nil)) == nil { try fm.removeItem(at: url) }
+                } catch {
+                    serverError = "Non riesco a eliminare \(Fmt.folder(path)): \(error.localizedDescription)"
+                    continue
+                }
+            }
+            await delete(ids)
+            if let filter = projectFilter, ProjectFolder.contains(path, filter) { projectFilter = nil }
+        }
     }
 
     private static var hiddenURL: URL { Belvedere.supportDirectory.appendingPathComponent("hidden.json") }
