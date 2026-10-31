@@ -18,6 +18,7 @@ public struct ChatState: Sendable {
     public var mcpServers: [MCPServerInfo] = []
     public var commands: [SlashCommand] = []
     public var terminalCommands: [String] = []
+    public var skills: [String] = []
     /// Remote Control attivo; `nil` se è spento.
     public var remoteControl: RemoteControl?
     /// Richiesta `remote_control` senza ancora risposta.
@@ -66,9 +67,12 @@ public struct ChatState: Sendable {
             permissionMode = info.permissionMode
             mcpServers = info.mcpServers
             terminalCommands = info.terminalCommands
+            skills = info.skills
             if commands.isEmpty { commands = info.slashCommands.map { SlashCommand(name: $0, description: "", argumentHint: "") } }
         case .commands(let list):
             commands = list
+        case .elicitation(_, let server, let message):
+            lastError = "\(server) chiede: «\(message)». Da qui non si può rispondere: apri la sessione nel terminale."
         case .line(let json):
             lastActivity = now
             guard case .object = json, let object = json.anyValue as? [String: Any] else { return }
@@ -249,6 +253,13 @@ public struct ChatState: Sendable {
     /// `/model` è una richiesta di controllo, non un turno: nessun `result` lo chiuderà.
     public mutating func modelChanged(_ model: String) {
         addNote("Modello: \(model)")
+    }
+
+    /// Risposta di un comando eseguito qui: nessun turno, solo la chat.
+    public mutating func addLocalReply(command: String, text: String) {
+        let id = UUID().uuidString
+        items.append(.user(id: "locale-\(id)", text: command))
+        items.append(.assistant(id: "risposta-\(id)", text: text))
     }
 
     public mutating func addNote(_ text: String) {

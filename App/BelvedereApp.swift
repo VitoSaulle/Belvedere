@@ -141,6 +141,17 @@ enum Appearance: String, CaseIterable, Identifiable {
         NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 
+    /// `nil` se il nome non esiste; senza nome si passa all'opposto di quello in uso.
+    @MainActor static func named(_ name: String?) -> Appearance? {
+        switch name?.lowercased() {
+        case nil: isDark ? .light : .dark
+        case "chiaro", "light": .light
+        case "scuro", "dark": .dark
+        case "sistema", "system", "auto": .system
+        default: nil
+        }
+    }
+
     @MainActor func apply() {
         switch self {
         case .system: NSApp.appearance = nil

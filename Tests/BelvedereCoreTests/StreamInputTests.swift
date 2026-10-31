@@ -82,3 +82,14 @@ import Testing
         #expect((mode["request"] as? [String: Any])?["mode"] as? String == "plan")
     }
 }
+
+@Suite struct ElicitationTests {
+    @Test func decodesAndCancels() throws {
+        let line = #"{"type":"control_request","request_id":"e1","request":{"subtype":"elicitation","mcp_server_name":"ado","message":"Token?"}}"#
+        #expect(StreamMessage.decode(Data(line.utf8)) == .elicitation(requestID: "e1", server: "ado", message: "Token?"))
+        let reply = try #require(JSONSerialization.jsonObject(with: StreamInput.cancelElicitation("e1")) as? [String: Any])
+        let response = try #require(reply["response"] as? [String: Any])
+        #expect(response["request_id"] as? String == "e1")
+        #expect((response["response"] as? [String: String]) == ["action": "cancel"])
+    }
+}
