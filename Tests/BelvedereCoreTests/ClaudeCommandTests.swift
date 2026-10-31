@@ -40,6 +40,14 @@ import Testing
         #expect(!ClaudeCommand.arguments(o, isGitRepository: false).contains("--worktree"))
     }
 
+    @Test func artifactsAreOnUnlessChosenOtherwise() {
+        let o = LaunchOptions(folder: "/p")
+        #expect(ClaudeCommand.environment(o, base: [:])["CLAUDE_CODE_ARTIFACT"] == "1")
+        #expect(ClaudeCommand.environment(o, base: ["CLAUDE_CODE_ARTIFACT": "0"])["CLAUDE_CODE_ARTIFACT"] == "0")
+        let local = LaunchOptions(folder: "/p", local: LocalModelChoice(id: "m", contextLength: 32768))
+        #expect(ClaudeCommand.environment(local, base: [:])["CLAUDE_CODE_ARTIFACT"] == nil)
+    }
+
     @Test func localModelEnvironment() {
         let o = LaunchOptions(folder: "/p", local: LocalModelChoice(id: "qwen3-coder-30b", contextLength: 32768))
         let base = ["PATH": "/usr/bin", "HOME": "/Users/u", "CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli",
@@ -65,18 +73,18 @@ import Testing
                     "CLAUDE_CODE_SESSION_ATTENDED": "1", "CLAUDE_CODE_BRIDGE_SESSION_ID": "b",
                     "CLAUDE_CODE_MESSAGING_SOCKET": "/s", "CLAUDE_CODE_MESSAGING_TOKEN": "t"]
         let env = ClaudeCommand.environment(LaunchOptions(folder: "/p"), base: base)
-        #expect(env == ["CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8000"])
+        #expect(env == ["CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8000", "CLAUDE_CODE_ARTIFACT": "1"])
     }
 
     @Test func cloudEnvironmentHasNoAnthropicOverrides() {
         let env = ClaudeCommand.environment(LaunchOptions(folder: "/p"), base: ["PATH": "/bin", "ANTHROPIC_LOG": "debug"])
-        #expect(env == ["PATH": "/bin", "ANTHROPIC_LOG": "debug"])
+        #expect(env == ["PATH": "/bin", "ANTHROPIC_LOG": "debug", "CLAUDE_CODE_ARTIFACT": "1"])
     }
 
     /// Una sessione genitore in modalità bare non deve passarla al figlio: Belvedere non lancia mai `--bare`.
     @Test func bareModeIsNotInherited() {
         let env = ClaudeCommand.environment(LaunchOptions(folder: "/p"), base: ["PATH": "/bin", "CLAUDE_CODE_SIMPLE": "1"])
-        #expect(env == ["PATH": "/bin"])
+        #expect(env == ["PATH": "/bin", "CLAUDE_CODE_ARTIFACT": "1"])
     }
 
     @Test func skipNeverCarriedOver() {

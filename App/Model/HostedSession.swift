@@ -84,6 +84,7 @@ final class HostedSession: Identifiable {
                     guard let self else { return }
                     switch event {
                     case .claude(let message):
+                        if case .elicitation(let id, _, _) = message { try? self.process?.send(StreamInput.cancelElicitation(id)) }
                         self.state.apply(message, now: Date())
                     case .codex(let message, let thread):
                         self.receive(message, thread: thread)
@@ -192,6 +193,22 @@ final class HostedSession: Identifiable {
                 state.permissionMode = "plan"
                 state.addNote("Modalità piano")
                 if let prompt { return send(prompt) }
+            }
+        case .local(let command):
+            if codex != nil {
+                state.addNote("/\(command.rawValue) si usa solo con Claude Code")
+            } else {
+                let configDir = profile?.configDir ?? NSHomeDirectory() + "/.claude"
+                state.addLocalReply(command: "/\(command.rawValue)",
+                                    text: command.report(state, folder: options.folder, configDir: configDir))
+            }
+        case .theme(let name):
+            if let appearance = Appearance.named(name) {
+                UserDefaults.standard.set(appearance.rawValue, forKey: Appearance.key)
+                appearance.apply()
+                state.addNote("Aspetto: \(appearance.label)")
+            } else {
+                state.addNote("Tema sconosciuto: usa chiaro, scuro o sistema")
             }
         case .terminalOnly, .plugins, .resume:
             break

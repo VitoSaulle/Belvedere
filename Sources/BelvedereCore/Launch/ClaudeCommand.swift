@@ -25,6 +25,8 @@ public enum ClaudeCommand {
     public static func environment(_ o: LaunchOptions, base: [String: String], profile: Profile? = nil) -> [String: String] {
         var env = profileEnvironment(base.filter { key, _ in !parentSessionVariables.contains(key) },
                                      key: "CLAUDE_CONFIG_DIR", profile: profile)
+        // Con `-p` la CLI spegne Artifact (`sdk_default_off`) anche se nel terminale c'è: si riaccende, salvo scelta dell'utente.
+        if o.local == nil, env["CLAUDE_CODE_ARTIFACT"] == nil { env["CLAUDE_CODE_ARTIFACT"] = "1" }
         if let local = o.local {
             env["ANTHROPIC_BASE_URL"] = "http://localhost:1234"
             env["ANTHROPIC_AUTH_TOKEN"] = "lmstudio"

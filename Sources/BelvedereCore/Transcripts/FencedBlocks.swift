@@ -80,3 +80,19 @@ public enum FencedBlocks {
         }.joined(separator: "\n")
     }
 }
+
+extension FencedBlocks {
+    /// Il markdown inline lega solo `[testo](url)`: gli indirizzi scritti nudi, come quelli degli artefatti, restano testo.
+    public static func linkingURLs(_ text: AttributedString) -> AttributedString {
+        var out = text
+        let plain = String(out.characters)
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        for match in detector?.matches(in: plain, range: NSRange(plain.startIndex..., in: plain)) ?? [] {
+            // Il rilevatore prende anche i falsi domini come «README.md»: si tengono gli indirizzi completi.
+            guard let url = match.url, let found = Range(match.range, in: plain), plain[found].hasPrefix("http"),
+                  let range = Range(match.range, in: out), out[range].link == nil else { continue }
+            out[range].link = url
+        }
+        return out
+    }
+}

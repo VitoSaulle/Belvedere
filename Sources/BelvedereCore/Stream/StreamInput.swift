@@ -60,6 +60,12 @@ public enum StreamInput {
                      "response": ["subtype": "success", "request_id": requestID, "response": inner]])
     }
 
+    /// Belvedere non sa raccogliere il dato: si annulla, così il server e il turno vanno avanti.
+    public static func cancelElicitation(_ requestID: String) -> Data {
+        line(["type": "control_response",
+              "response": ["subtype": "success", "request_id": requestID, "response": ["action": "cancel"]]])
+    }
+
     private static func control(_ id: String, _ request: [String: Any]) -> Data {
         line(["type": "control_request", "request_id": id, "request": request])
     }

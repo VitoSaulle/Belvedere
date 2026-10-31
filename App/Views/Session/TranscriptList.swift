@@ -90,8 +90,8 @@ struct TranscriptRow: View {
             switch part {
             case .text(let text):
                 let text = Self.bullets(text)
-                out += (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                    ?? AttributedString(text)
+                out += FencedBlocks.linkingURLs((try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                    ?? AttributedString(text))
             case .code(let code):
                 var block = AttributedString(code)
                 block.font = .system(size: 12.5, design: .monospaced)

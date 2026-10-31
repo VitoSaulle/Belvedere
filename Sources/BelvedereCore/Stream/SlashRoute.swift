@@ -14,6 +14,10 @@ public enum SlashRoute: Equatable, Sendable {
     case plan(prompt: String?)
     /// `/resume`: il selettore delle conversazioni, con il testo cercato se c'è.
     case resume(query: String?)
+    /// Schermate del terminale a cui Belvedere risponde da sé.
+    case local(LocalCommand)
+    /// `/theme`: l'aspetto di Belvedere, chiaro, scuro o di sistema; senza argomento si alterna.
+    case theme(String?)
     /// Comandi che funzionano solo nel terminale.
     case terminalOnly(String)
 
@@ -25,6 +29,14 @@ public enum SlashRoute: Equatable, Sendable {
         SlashCommand(name: "rc", description: "Controlla la sessione dal telefono o da claude.ai/code", argumentHint: "[nome]"),
         SlashCommand(name: "plan", description: "Passa alla modalità piano", argumentHint: "[messaggio]"),
         SlashCommand(name: "resume", description: "Riprendi un'altra conversazione", argumentHint: "[cerca]"),
+        SlashCommand(name: "status", description: "Stato della sessione", argumentHint: ""),
+        SlashCommand(name: "memory", description: "File di memoria e CLAUDE.md in uso", argumentHint: ""),
+        SlashCommand(name: "permissions", description: "Regole dei permessi", argumentHint: ""),
+        SlashCommand(name: "hooks", description: "Hook configurati", argumentHint: ""),
+        SlashCommand(name: "skills", description: "Skill disponibili", argumentHint: ""),
+        SlashCommand(name: "statusline", description: "Status line configurata", argumentHint: ""),
+        SlashCommand(name: "tasks", description: "Subagent e altre sessioni attive", argumentHint: ""),
+        SlashCommand(name: "theme", description: "Aspetto di Belvedere", argumentHint: "[chiaro|scuro|sistema]"),
     ]
 
     public static func route(_ text: String, terminalCommands: [String]) -> SlashRoute {
@@ -40,7 +52,11 @@ public enum SlashRoute: Equatable, Sendable {
         case "rc", "remote-control": return .remoteControl(name: argument.isEmpty ? nil : argument)
         case "plan": return .plan(prompt: argument.isEmpty ? nil : argument)
         case "resume": return .resume(query: argument.isEmpty ? nil : argument)
+        case "theme": return .theme(argument.isEmpty ? nil : argument)
+        // La CLI non ha `/tasks` in stream-json: `/list-agents` è il suo equivalente più vicino.
+        case "tasks": return .send("/list-agents")
         default:
+            if let local = LocalCommand(rawValue: name) { return .local(local) }
             if alwaysTerminal.contains(name) || terminalCommands.contains(name) { return .terminalOnly(name) }
             return .send(text)
         }

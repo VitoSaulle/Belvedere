@@ -27,6 +27,7 @@ public struct StreamInit: Equatable, Sendable {
     public let slashCommands: [String]
     public let terminalCommands: [String]
     public let mcpServers: [MCPServerInfo]
+    public var skills: [String] = []
 }
 
 /// Richiesta `can_use_tool`: un permesso, oppure una domanda se lo strumento è `AskUserQuestion`.
@@ -92,6 +93,8 @@ public enum StreamMessage: Equatable, Sendable {
     case line(json: JSONValue)
     case textDelta(String)
     case permission(PermissionAsk)
+    /// Un server MCP chiede un dato all'utente: senza risposta il turno resta fermo.
+    case elicitation(requestID: String, server: String, message: String)
     case controlResponse(requestID: String, payload: JSONValue)
     case controlFailed(requestID: String, message: String)
     /// La richiesta è stata risolta altrove (dal telefono, con Remote Control).
@@ -131,6 +134,10 @@ public enum StreamMessage: Equatable, Sendable {
                   let text = event["delta"]?["text"]?.stringValue else { return .other }
             return .textDelta(text)
         case "control_request":
+            if let id = o["request_id"]?.stringValue, json["request"]?["subtype"]?.stringValue == "elicitation" {
+                return .elicitation(requestID: id, server: json["request"]?["mcp_server_name"]?.stringValue ?? "MCP",
+                                    message: json["request"]?["message"]?.stringValue ?? "")
+            }
             guard let id = o["request_id"]?.stringValue, let request = json["request"],
                   request["subtype"]?.stringValue == "can_use_tool",
                   let tool = request["tool_name"]?.stringValue else { return .other }
@@ -184,7 +191,7 @@ public enum StreamMessage: Equatable, Sendable {
                                        cwd: json["cwd"]?.stringValue ?? "",
                                        slashCommands: strings(json["slash_commands"]),
                                        terminalCommands: strings(json["terminal_slash_commands"]),
-                                       mcpServers: servers))
+                                       mcpServers: servers, skills: strings(json["skills"])))
     }
 
     private static func rateLimits(_ windows: JSONValue?) -> StreamMessage {
