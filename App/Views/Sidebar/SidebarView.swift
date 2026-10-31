@@ -3,10 +3,12 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    /// Righe scelte con ⌘ o ⇧; con una riga sola vale la posizione corrente.
+    @State private var picked: Set<Route> = []
 
     var body: some View {
         @Bindable var model = model
-        List(selection: Binding<Route?>(get: { model.route }, set: { if let r = $0 { model.route = r } })) {
+        List(selection: Binding(get: { selection }, set: select)) {
             Label {
                 HStack {
                     Text("Plancia")
@@ -28,7 +30,6 @@ struct SidebarView: View {
             Section {
                 ForEach(model.boardSessions.prefix(12)) { session in
                     SessionRow(session: session).tag(Route.session(session.id))
-                        .contextMenu { SessionMenuItems(sessionID: session.id) }
                 }
                 if model.boardSessions.isEmpty {
                     Text("Nessuna sessione").foregroundStyle(.secondary)
@@ -47,20 +48,15 @@ struct SidebarView: View {
 
             Section("Progetti") {
                 ForEach(projects, id: \.path) { project in
-                    Button {
-                        model.projectFilter = model.projectFilter == project.path ? nil : project.path
-                        model.route = .plancia
-                    } label: {
-                        HStack {
-                            Image(systemName: model.projectFilter == project.path ? "folder.fill" : "folder")
-                                .foregroundStyle(model.projectFilter == project.path ? Theme.accent : .secondary)
-                            Text(Fmt.folder(project.path)).lineLimit(1)
-                            Spacer()
-                            Text("\(project.count)").foregroundStyle(.secondary).monospacedDigit()
-                        }
+                    HStack {
+                        Image(systemName: model.projectFilter == project.path ? "folder.fill" : "folder")
+                            .foregroundStyle(model.projectFilter == project.path ? Theme.accent : .secondary)
+                        Text(Fmt.folder(project.path)).lineLimit(1)
+                        Spacer()
+                        Text("\(project.count)").foregroundStyle(.secondary).monospacedDigit()
                     }
-                    .buttonStyle(.plain)
                     .help(project.path)
+                    .tag(Route.project(project.path))
                 }
             }
 
@@ -69,6 +65,7 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .contextMenu(forSelectionType: Route.self) { SidebarMenuItems(rows: $0) }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             // Fondo pieno sotto il vetro: le righe che scorrono non devono trasparire dietro i limiti.
             PlanUsageCard()
@@ -78,12 +75,65 @@ struct SidebarView: View {
         }
     }
 
+    private var selection: Set<Route> {
+        let shown = Set(model.boardSessions.map(\.id))
+        let alive = picked.filter { row in
+            if case .session(let id) = row { shown.contains(id) } else { true }
+        }
+        if alive.count > 1 { return alive }
+        if model.route == .plancia, let project = model.projectFilter { return [.project(project)] }
+        return [model.route]
+    }
+
+    /// Una riga sola è una destinazione; più righe sono solo una scelta su cui agire dal menu.
+    private func select(_ rows: Set<Route>) {
+        picked = rows
+        guard rows.count == 1, let row = rows.first else { return }
+        switch row {
+        case .project(let path):
+            model.projectFilter = path
+            model.route = .plancia
+        case .plancia:
+            model.projectFilter = nil
+            model.route = .plancia
+        default:
+            model.route = row
+        }
+    }
+
     /// Cartelle distinte delle sessioni attive o recenti, dalla più usata.
     private var projects: [(path: String, count: Int)] {
         let counts = Dictionary(grouping: model.boardSessions.filter { !$0.cwd.isEmpty }, by: \.cwd).mapValues(\.count)
         return counts.map { (path: $0.key, count: $0.value) }
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0.path < $1.path }
             .prefix(8).map { $0 }
+    }
+}
+
+/// Menu delle righe della sidebar: una sessione, un progetto o più righe insieme.
+private struct SidebarMenuItems: View {
+    @Environment(AppModel.self) private var model
+    let rows: Set<Route>
+
+    var body: some View {
+        if rows.count == 1, case .session(let id)? = rows.first {
+            SessionMenuItems(sessionID: id)
+        } else if rows.count == 1, case .project(let path)? = rows.first {
+            ProjectMenuItems(path: path)
+        } else if !ids.isEmpty {
+            BulkMenuItems(sessionIDs: ids)
+        }
+    }
+
+    /// Le sessioni scelte più quelle dei progetti scelti, senza doppioni.
+    private var ids: [String] {
+        Set(rows.flatMap { row -> [String] in
+            switch row {
+            case .session(let id): [id]
+            case .project(let path): model.sessionIDs(inProject: path)
+            default: []
+            }
+        }).sorted()
     }
 }
 

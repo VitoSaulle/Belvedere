@@ -41,6 +41,8 @@ final class AppModel {
     var route: Route = .plancia
     /// Cartella su cui è filtrata la Plancia, scelta dalla sezione «Progetti».
     var projectFilter: String?
+    /// Sessioni scelte in Plancia con ⌘ o ⇧.
+    var cardSelection = SessionSelection()
 
     @ObservationIgnored private var store = LiveSessionStore()
     @ObservationIgnored private var roots: TranscriptRoots
@@ -117,6 +119,9 @@ final class AppModel {
 
     var hiddenSessions: [SessionSnapshot] { allSessions.filter { hidden.isHidden($0) } }
 
+    /// Sessioni di una cartella, nascoste comprese. Un progetto si nasconde e si elimina attraverso queste.
+    func sessionIDs(inProject path: String) -> [String] { allSessions.filter { $0.cwd == path }.map(\.id) }
+
     /// Sessioni concluse da più di una settimana che si possono nascondere in blocco.
     var staleSessionIDs: [String] { HiddenSessions.staleIDs(sessions, olderThanDays: 7, now: Date()) }
 
@@ -126,6 +131,7 @@ final class AppModel {
         let now = Date()
         for id in ids { hidden.hide(id, at: max(now, session(id)?.lastActivity ?? now)) }
         saveHidden()
+        cardSelection = SessionSelection()
         publish()
     }
 
@@ -157,6 +163,7 @@ final class AppModel {
         if case .session(let id) = route, deleted.contains(id) { route = .plancia }
         for id in deleted { hidden.unhide(id) }
         saveHidden()
+        cardSelection = SessionSelection()
         store.forget(deleted)
         syncHosted()
         await saveIndex()

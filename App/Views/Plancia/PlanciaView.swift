@@ -39,6 +39,7 @@ struct PlanciaView: View {
                         .font(.callout)
                         .foregroundStyle(Theme.danger)
                 }
+                if !model.cardSelection.isEmpty { selectionBar }
                 content
             }
             .padding(.horizontal, 22)
@@ -47,6 +48,22 @@ struct PlanciaView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle("")
+        .onChange(of: filter) { model.cardSelection = SessionSelection() }
+        .onChange(of: model.projectFilter) { model.cardSelection = SessionSelection() }
+    }
+
+    private var selectionBar: some View {
+        let ids = model.cardSelection.ids.sorted()
+        return HStack(spacing: 10) {
+            Text(ids.count == 1 ? "1 sessione selezionata" : "\(ids.count) sessioni selezionate")
+                .font(.system(size: 12.5, weight: .medium))
+            Spacer()
+            Button("Nascondi", systemImage: "eye.slash") { model.hide(ids) }
+            DeleteButton(sessionIDs: ids)
+            Button("Annulla") { model.cardSelection = SessionSelection() }
+        }
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.capsule)
     }
 
     private var visible: [SessionSnapshot] {
@@ -162,8 +179,7 @@ struct PlanciaView: View {
         } else {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 290, maximum: 420), spacing: 14, alignment: .top)], spacing: 14) {
                 ForEach(visible) { session in
-                    SessionCard(session: session)
-                        .contextMenu { SessionMenuItems(sessionID: session.id) }
+                    SessionCard(session: session, order: visible.map(\.id))
                 }
             }
             .animation(.smooth(duration: 0.25), value: visible.map(\.id))
@@ -233,6 +249,29 @@ struct SessionMenuItems: View {
     }
 }
 
+/// «Nascondi» ed «Elimina…» su più sessioni scelte insieme.
+struct BulkMenuItems: View {
+    @Environment(AppModel.self) private var model
+    let sessionIDs: [String]
+
+    var body: some View {
+        Button("Nascondi \(sessionIDs.count) sessioni", systemImage: "eye.slash") { model.hide(sessionIDs) }
+        DeleteButton(sessionIDs: sessionIDs, title: "Elimina \(sessionIDs.count) sessioni…")
+    }
+}
+
+/// «Nascondi» ed «Elimina…» su tutte le sessioni di un progetto. La cartella non si tocca.
+struct ProjectMenuItems: View {
+    @Environment(AppModel.self) private var model
+    let path: String
+
+    var body: some View {
+        let ids = model.sessionIDs(inProject: path)
+        Button("Nascondi il progetto \(Fmt.folder(path))", systemImage: "eye.slash") { model.hide(ids) }
+        DeleteButton(sessionIDs: ids, title: "Elimina le sessioni di \(Fmt.folder(path)) (\(ids.count))…")
+    }
+}
+
 /// «Continua con…»: la conversazione passa a un altro profilo della stessa CLI.
 struct ContinueMenu: View {
     @Environment(AppModel.self) private var model
@@ -273,7 +312,7 @@ struct DeleteButton: View {
     alert.alertStyle = .warning
     alert.messageText = count == 1 ? "Eliminare la sessione?" : "Eliminare \(count) sessioni?"
     alert.informativeText = "I file della trascrizione vengono cancellati subito, senza passare dal Cestino, "
-        + "e non si potranno più riprendere. Le statistiche d'uso restano."
+        + "e non si potranno più riprendere. Le cartelle dei progetti e le statistiche d'uso restano."
     alert.addButton(withTitle: "Elimina").hasDestructiveAction = true
     alert.addButton(withTitle: "Annulla")
     return alert.runModal() == .alertFirstButtonReturn
