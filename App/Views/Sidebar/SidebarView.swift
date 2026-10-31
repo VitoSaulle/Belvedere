@@ -8,7 +8,7 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var model = model
-        List(selection: Binding(get: { selection }, set: select)) {
+        List(selection: Binding<Set<Route>>(get: { selection }, set: { select($0) })) {
             Label {
                 HStack {
                     Text("Plancia")
@@ -78,7 +78,8 @@ struct SidebarView: View {
     private var selection: Set<Route> {
         let shown = Set(model.boardSessions.map(\.id))
         let alive = picked.filter { row in
-            if case .session(let id) = row { shown.contains(id) } else { true }
+            guard case .session(let id) = row else { return true }
+            return shown.contains(id)
         }
         if alive.count > 1 { return alive }
         if model.route == .plancia, let project = model.projectFilter { return [.project(project)] }
@@ -116,24 +117,30 @@ private struct SidebarMenuItems: View {
     let rows: Set<Route>
 
     var body: some View {
-        if rows.count == 1, case .session(let id)? = rows.first {
+        if let id = single.session {
             SessionMenuItems(sessionID: id)
-        } else if rows.count == 1, case .project(let path)? = rows.first {
+        } else if let path = single.project {
             ProjectMenuItems(path: path)
         } else if !ids.isEmpty {
             BulkMenuItems(sessionIDs: ids)
         }
     }
 
+    private var single: (session: String?, project: String?) {
+        guard rows.count == 1, let row = rows.first else { return (nil, nil) }
+        if case .session(let id) = row { return (id, nil) }
+        if case .project(let path) = row { return (nil, path) }
+        return (nil, nil)
+    }
+
     /// Le sessioni scelte più quelle dei progetti scelti, senza doppioni.
     private var ids: [String] {
-        Set(rows.flatMap { row -> [String] in
-            switch row {
-            case .session(let id): [id]
-            case .project(let path): model.sessionIDs(inProject: path)
-            default: []
-            }
-        }).sorted()
+        var ids = Set<String>()
+        for row in rows {
+            if case .session(let id) = row { ids.insert(id) }
+            if case .project(let path) = row { ids.formUnion(model.sessionIDs(inProject: path)) }
+        }
+        return ids.sorted()
     }
 }
 
