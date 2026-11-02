@@ -5,6 +5,7 @@ struct TranscriptList: View {
     let session: SessionSnapshot
     @State private var items: [TranscriptItem] = []
     @State private var loaded = false
+    @State private var following = true
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -33,6 +34,7 @@ struct TranscriptList: View {
             }
             .scrollContentBackground(.hidden)
             .defaultScrollAnchor(.bottom)
+            .onScrollGeometryChange(for: ScrollSpot.self, of: ScrollSpot.init) { following = ScrollSpot.following(following, from: $0, to: $1) }
             .task(id: "\(session.id)|\(session.lastActivity?.timeIntervalSince1970 ?? 0)") {
                 let path = session.transcriptPath, agent = session.agent
                 let fresh = await Task.detached(priority: .userInitiated) {
@@ -41,9 +43,7 @@ struct TranscriptList: View {
                 let grew = fresh.last?.id != items.last?.id
                 items = fresh
                 loaded = true
-                if grew {
-                    withAnimation(.smooth(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
-                }
+                if grew && following { proxy.scrollTo("end", anchor: .bottom) }
             }
         }
     }
@@ -175,6 +175,7 @@ struct WorkingIndicator: View {
 /// Conversazione dal vivo di una sessione lanciata da Belvedere: messaggi, testo in arrivo, richieste.
 struct HostedTranscript: View {
     let host: HostedSession
+    @State private var following = true
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -211,14 +212,16 @@ struct HostedTranscript: View {
             }
             .scrollContentBackground(.hidden)
             .defaultScrollAnchor(.bottom)
+            .onScrollGeometryChange(for: ScrollSpot.self, of: ScrollSpot.init) { following = ScrollSpot.following(following, from: $0, to: $1) }
             .onChange(of: host.state.items.count) { scrollToEnd(proxy) }
             .onChange(of: host.state.asks.count) { scrollToEnd(proxy) }
-            .onChange(of: host.state.streaming?.count) { proxy.scrollTo("end", anchor: .bottom) }
+            .onChange(of: host.state.streaming?.count) { scrollToEnd(proxy) }
         }
     }
 
+    /// Senza animazione: con le altezze stimate della LazyVStack l'animazione fa saltare la chat su e giù.
     private func scrollToEnd(_ proxy: ScrollViewProxy) {
-        withAnimation(.smooth(duration: 0.25)) { proxy.scrollTo("end", anchor: .bottom) }
+        if following { proxy.scrollTo("end", anchor: .bottom) }
     }
 }
 
@@ -235,5 +238,11 @@ struct StreamingText: View {
             .onAppear {
                 withAnimation(.easeInOut(duration: 0.6).repeatForever()) { on = false }
             }
+    }
+}
+
+extension ScrollSpot {
+    init(_ geometry: ScrollGeometry) {
+        self.init(offset: geometry.contentOffset.y, viewport: geometry.containerSize.height, content: geometry.contentSize.height)
     }
 }
